@@ -1,5 +1,9 @@
 # GLM-5.3 CP8 + DCP4: первый запуск на H200
 
+Для специализированного FP8 prefill подготовлен [комплект q8-v2](../glm53-cp8-dcp4-q8-v2/README.md).
+Он требует нового образа; GPU-проверка ещё предстоит. Исходный v1 зафиксирован
+коммитом `7f7331fa4408ea32b1e508020b6a860a8cfea66d`.
+
 Ручной backport Hopper DSA DCP из [SGLang PR #36990](https://github.com/sgl-project/sglang/pull/36990),
 head `c6aeb8b9d9128b816777e2b64cbf6603344e8fe1`, на базу
 `0bcd822377da7b5718e674eaf9c870d349424dd1`. Исходная работа — автор PR и SGLang contributors,

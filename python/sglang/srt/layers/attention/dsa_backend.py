@@ -420,13 +420,20 @@ class DeepseekSparseAttnBackend(
                 )
             if (
                 self.dsa_decode_impl != "flashmla_kv"
-                or self.dsa_prefill_impl != "flashmla_kv"
+                or self.dsa_prefill_impl not in ("flashmla_kv", "flashmla_sparse_q8")
             ):
                 raise ValueError(
-                    "DSA with DCP currently supports only flashmla_kv for both "
-                    "prefill and decode; got "
+                    "DSA with DCP requires flashmla_kv decode and flashmla_kv "
+                    "or flashmla_sparse_q8 prefill; got "
                     f"prefill={self.dsa_prefill_impl!r}, "
                     f"decode={self.dsa_decode_impl!r}."
+                )
+            if self.dsa_prefill_impl == "flashmla_sparse_q8" and not (
+                is_dsa_enable_prefill_cp() and parallel.attn_cp_size > 1
+            ):
+                raise ValueError(
+                    "flashmla_sparse_q8 with DCP requires prefill CP; "
+                    "the TP-only DCP prefill path uses flashmla_kv."
                 )
             if (
                 parallel.attn_cp_size > 1
@@ -863,15 +870,7 @@ class DeepseekSparseAttnBackend(
 
         # Centralized dispatch: decide all strategies for this batch
         self.set_dsa_prefill_impl(forward_batch)
-        dsa_impl_for_batch = (
-            self.dsa_decode_impl
-            if (
-                forward_batch.forward_mode.is_decode_or_idle()
-                or forward_batch.forward_mode.is_target_verify()
-                or forward_batch.forward_mode.is_draft_extend_v2()
-            )
-            else self.dsa_prefill_impl
-        )
+        dsa_impl_for_batch = self._dsa_impl_for_batch(forward_batch)
         use_flashmla_kv = (not self.use_mha) and dsa_impl_for_batch == "flashmla_kv"
         topk_transform_method = self.get_topk_transform_method(
             forward_batch.forward_mode
@@ -2003,14 +2002,7 @@ class DeepseekSparseAttnBackend(
         metadata = self.forward_metadata
         assert causal, "DSA is causal only"
 
-        dsa_impl = (
-            self.dsa_decode_impl
-            if (
-                forward_batch.forward_mode.is_target_verify()
-                or forward_batch.forward_mode.is_draft_extend_v2()
-            )
-            else self.dsa_prefill_impl
-        )
+        dsa_impl = self._dsa_impl_for_batch(forward_batch)
 
         if dsa_impl == "trtllm" and not self.use_mha:
             return self._forward_trtllm(
@@ -2183,6 +2175,18 @@ class DeepseekSparseAttnBackend(
                 v_head_dim=layer.v_head_dim,
             )
         elif dsa_impl in ("flashmla_sparse", "flashmla_sparse_q8"):
+            if self.dcp_enabled and dsa_impl == "flashmla_sparse_q8":
+                if not use_dcp_full_kv:
+                    raise RuntimeError(
+                        "DCP q8 prefill requires CP-gathered KV; non-CP extend "
+                        "must use the flashmla_kv fallback."
+                    )
+                # PAGED translation above produced offsets into dcp_kv_buffer,
+                # NOT physical slots in a persistent local DCP shard. Preserve
+                # those offsets when converting packed KV to the Q8KV8 layout.
+                return self._forward_dcp_sparse_q8(
+                    q_nope, q_rope, kv_cache, page_table_1, layer
+                )
             if topk_transform_method == TopkTransformMethod.RAGGED:
                 _has_prefix = any(forward_batch.extend_prefix_lens_cpu)
                 page_table_1 = topk_indices
@@ -2680,6 +2684,38 @@ class DeepseekSparseAttnBackend(
             )
             self._q8kv8_born_q_sentinel = buf
         return buf[:numel].view(num_tokens, num_heads, v_head_dim)
+
+    def _forward_dcp_sparse_q8(
+        self,
+        q_nope: torch.Tensor,
+        q_rope: torch.Tensor,
+        gathered_kv: torch.Tensor,
+        gathered_topk: torch.Tensor,
+        layer: RadixAttention,
+    ) -> torch.Tensor:
+        """Run Q8KV8 over the same global KV view used by CP+DCP flashmla_kv.
+
+        The gather planner orders rows as all prefixes then all current tokens,
+        not request-major. Identity row selection keeps the mapped top-k valid,
+        including request subsets assigned to a CP rank and -1 sentinels.
+        Reuse the existing packed-FP8 -> per-tensor-FP8 conversion and kernel;
+        do not gather from the local persistent pool a second time.
+        """
+        if gathered_kv.dtype != torch.float8_e4m3fn:
+            raise RuntimeError("DCP q8 prefill requires packed FP8 gathered KV")
+        return self._forward_flashmla_sparse_q8kv8(
+            q_nope=q_nope,
+            q_rope=q_rope,
+            kv_bf16=None,
+            paged_kv_cache=gathered_kv,
+            page_table_1_flattened=self.get_device_int32_arange(
+                gathered_kv.shape[0]
+            ),
+            page_table_1=gathered_topk,
+            sm_scale=layer.scaling,
+            v_head_dim=layer.v_head_dim,
+            layer_id=layer.layer_id,
+        )
 
     def _forward_flashmla_sparse_q8kv8(
         self,
@@ -3534,6 +3570,26 @@ class DeepseekSparseAttnBackend(
                 # bf16 kv cache
                 self.dsa_prefill_impl = "flashmla_sparse"
 
+    def _dsa_impl_for_batch(self, forward_batch: ForwardBatch) -> str:
+        """Select the same attention entry for metadata and kernel dispatch."""
+        mode = forward_batch.forward_mode
+        if (
+            mode.is_decode_or_idle()
+            or mode.is_target_verify()
+            or mode.is_draft_extend_v2()
+        ):
+            return self.dsa_decode_impl
+        if (
+            self.dcp_enabled
+            and self.dsa_prefill_impl == "flashmla_sparse_q8"
+            and not dsa_use_prefill_cp(forward_batch)
+        ):
+            # Interleave CP requires at least CP-size new tokens. A smaller
+            # chunk/tail uses Q-gather + local attention + LSE reduction, so it
+            # must also build FlashMLA metadata instead of the q8 CP metadata.
+            return "flashmla_kv"
+        return self.dsa_prefill_impl
+
     def get_topk_transform_method(
         self, forward_mode: Optional[ForwardMode] = None
     ) -> TopkTransformMethod:
@@ -3544,6 +3600,10 @@ class DeepseekSparseAttnBackend(
         if (
             # disable for MTP
             self.dsa_kv_cache_store_fp8
+            # DCP q8 maps logical top-k through dcp_page_table_1 into the
+            # gathered KV layout. The ordinary RAGGED offsets address a
+            # different, request-major layout and would silently read wrong KV.
+            and not self.dcp_enabled
             # flashmla_sparse_q8 shares flashmla_sparse's RAGGED prefill routing — the q8
             # dispatch lives inside the RAGGED branch of forward_extend; without this the
             # transform is PAGED, the q8 path is skipped, and the bf16 kernel crashes on
