@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           export GIT_TERMINAL_PROMPT=0
           gh auth setup-git
-          git init --bare transfer.git
+          git init transfer.git
           cd transfer.git
           git remote add origin https://github.com/leoong55/sglang-lasolovev.git
           git remote add upstream https://github.com/sgl-project/sglang.git
