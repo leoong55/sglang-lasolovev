@@ -68,6 +68,11 @@ def handle_context_parallelism(server_args: Any):
             "--cp-strategy must be set when --enable-prefill-cp is enabled."
         )
 
+    if cfg.enable_prefill_cp and cfg.dcp_size > 1 and cfg.cp_strategy != "interleave":
+        raise ValueError(
+            "DCP with prefill CP currently supports only --cp-strategy interleave."
+        )
+
     if cfg.enable_prefill_context_parallel and cfg.enable_dsa_prefill_context_parallel:
         raise ValueError(
             "--enable-prefill-context-parallel and "
