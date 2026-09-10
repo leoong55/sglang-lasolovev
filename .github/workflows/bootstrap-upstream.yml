@@ -1,0 +1,50 @@
+name: Bootstrap pinned SGLang upstream
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/bootstrap-upstream.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-upstream
+  cancel-in-progress: false
+
+jobs:
+  import:
+    if: github.repository == 'leoong55/sglang-lasolovev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: 0bcd822377da7b5718e674eaf9c870d349424dd1
+      BOOTSTRAP_SHA: ${{ github.sha }}
+    steps:
+      - name: Import exact upstream commit and preserve bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          gh auth setup-git
+          git init --bare transfer.git
+          cd transfer.git
+          git remote add origin https://github.com/leoong55/sglang-lasolovev.git
+          git remote add upstream https://github.com/sgl-project/sglang.git
+          git fetch origin refs/heads/main
+          CURRENT_SHA="$(git rev-parse FETCH_HEAD)"
+          test "$CURRENT_SHA" = "$BOOTSTRAP_SHA"
+          test "$(git rev-list --count "$BOOTSTRAP_SHA")" = 1
+          test "$(git ls-tree -r --name-only "$BOOTSTRAP_SHA")" = ".github/workflows/bootstrap-upstream.yml"
+          git fetch upstream "$TARGET_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$TARGET_SHA"
+          git cat-file -e "$TARGET_SHA^{commit}"
+          git push --atomic origin \
+            --force-with-lease="refs/heads/main:$BOOTSTRAP_SHA" \
+            --force-with-lease="refs/heads/codex/bootstrap-upstream:" \
+            "$BOOTSTRAP_SHA:refs/heads/codex/bootstrap-upstream" \
+            "$TARGET_SHA:refs/heads/main"
+          REMOTE_SHA="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test "$REMOTE_SHA" = "$TARGET_SHA"
+          echo "Imported upstream commit: $REMOTE_SHA" >> "$GITHUB_STEP_SUMMARY"
