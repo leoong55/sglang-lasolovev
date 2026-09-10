@@ -1197,6 +1197,15 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
     def can_run_graph(self, forward_batch: ForwardBatch) -> bool:
         # DP check: group verdict from the schedule-time all-gather
         # (min-reduced votes; also requires every rank to hold tokens).
+        from sglang.srt.layers.cp.glm53_bcg import supports as supports_glm53_bcg
+
+        if supports_glm53_bcg(self.model_runner.server_args):
+            if (
+                forward_batch.forward_mode != ForwardMode.EXTEND
+                or len(forward_batch.input_ids) != 8192
+                or not is_cp_v2_active(forward_batch)
+            ):
+                return False
         if (
             forward_batch.global_num_tokens_cpu is not None
             and not forward_batch.can_run_dp_prefill_cuda_graph

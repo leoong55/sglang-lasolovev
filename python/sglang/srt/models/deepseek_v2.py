@@ -26,9 +26,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-from transformers import PretrainedConfig
-
 from sglang.kernels.ops.attention.dsv4 import (
     silu_and_mul_clamp,
     silu_and_mul_contig_post_quant,
@@ -219,6 +216,8 @@ from sglang.srt.utils import (
     use_intel_amx_backend,
 )
 from sglang.srt.utils.custom_op import register_custom_op
+from torch import nn
+from transformers import PretrainedConfig
 
 if _use_aiter:
     from sglang.srt.layers.rocm_linear_utils import aiter_dsv3_router_gemm
@@ -2070,6 +2069,43 @@ class DeepseekV2AttentionMLA(
             state.hidden_states_after_attn = result
 
     def forward(
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        forward_batch: ForwardBatch,
+        zero_allocator: BumpAllocator,
+        layer_scatter_modes: LayerScatterModes = None,
+        llama_4_scaling: Optional[torch.Tensor] = None,
+        prev_topk_indices: Optional[torch.Tensor] = None,
+    ):
+        from sglang.srt.layers.cp.glm53_bcg import attention_break, enabled
+        from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph import (
+            is_in_breakable_cuda_graph,
+        )
+
+        if (
+            enabled()
+            and is_in_breakable_cuda_graph()
+            and is_cp_v2_active(forward_batch)
+        ):
+            return attention_break(
+                self,
+                hidden_states,
+                layer_scatter_modes,
+                llama_4_scaling,
+                prev_topk_indices,
+            )
+        return self._forward_impl(
+            positions,
+            hidden_states,
+            forward_batch,
+            zero_allocator,
+            layer_scatter_modes,
+            llama_4_scaling,
+            prev_topk_indices,
+        )
+
+    def _forward_impl(
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
