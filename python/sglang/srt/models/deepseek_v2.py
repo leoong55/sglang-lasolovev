@@ -868,6 +868,27 @@ class DeepseekV2MoE(nn.Module):
         # forward (weights and runner are final by then). None = undecided.
         self._moe_quant_once: Optional[bool] = None
 
+        self.prefill_deepep = None
+        if envs.SGLANG_GLM53_DEEPEP_PREFILL.get():
+            from sglang.srt.layers.moe.glm53_prefill_deepep import Glm53PrefillDeepEP
+
+            if not dsa_enable_prefill_cp:
+                raise ValueError("GLM53 prefill DeepEP requires DSA context parallelism")
+            self.prefill_deepep = Glm53PrefillDeepEP(self, config)
+            # Preserve the original TP-sharded shared expert for decode. The
+            # additional TP1 copy is loaded by the same checkpoint weight loaders.
+            self.prefill_shared_experts = DeepseekV2MLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=config.moe_intermediate_size * config.n_shared_experts,
+                hidden_act=config.hidden_act,
+                quant_config=quant_config,
+                reduce_results=False,
+                prefix=add_prefix("shared_experts", prefix),
+                tp_rank=0,
+                tp_size=1,
+                swiglu_limit=getattr(config, "swiglu_limit", None),
+            )
+
     def get_moe_weights(self):
         # EPLB only rebalances physical routed experts. Fused shared expert
         # slots live after each rank's routed slots and must stay stable.
@@ -2519,6 +2540,22 @@ class DeepseekV2DecoderLayer(nn.Module):
             forward_batch, next_full_attention_layer_id
         )
 
+        if (
+            isinstance(self.mlp, DeepseekV2MoE)
+            and self.mlp.prefill_deepep is not None
+            and dsa_use_prefill_cp(forward_batch, self.dsa_enable_prefill_cp)
+        ):
+            # CP attention already returned a token shard. Normalize locally,
+            # dispatch to routed experts, then return to exactly that shard.
+            # No hidden-state all-gather/reduce-scatter or deferred all-reduce.
+            hidden_states, residual = self.post_attention_layernorm(
+                hidden_states, residual
+            )
+            hidden_states = self.mlp.prefill_deepep.forward(
+                self.mlp, hidden_states, forward_batch
+            )
+            return hidden_states, residual, topk_indices
+
         hidden_states, residual = self.layer_communicator.prepare_mlp(
             hidden_states, residual, forward_batch
         )
@@ -3188,7 +3225,24 @@ class DeepseekV2ForCausalLM(nn.Module, DeepseekV2WeightLoaderMixin):
         return self.model.end_layer
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]], is_nextn=False):
+        if envs.SGLANG_GLM53_DEEPEP_PREFILL.get():
+            from sglang.srt.layers.moe.glm53_prefill_deepep import (
+                duplicate_shared_weights,
+            )
+
+            weights = duplicate_shared_weights(weights, self)
         self.do_load_weights(weights, is_nextn)
+        if envs.SGLANG_GLM53_DEEPEP_PREFILL.get():
+            extra_bytes = sum(
+                p.numel() * p.element_size()
+                for name, p in self.named_parameters()
+                if ".mlp.prefill_shared_experts." in name
+            )
+            logger.info(
+                "GLM53 v4: additional prefill shared-expert weights/scales %.3f GiB per GPU; "
+                "included in model memory before KV sizing",
+                extra_bytes / (1024 ** 3),
+            )
 
     def get_embed_and_head(self):
         return self.model.embed_tokens.weight, self.lm_head.weight
