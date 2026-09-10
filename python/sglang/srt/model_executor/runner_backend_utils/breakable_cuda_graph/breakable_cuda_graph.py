@@ -23,6 +23,7 @@ buffers to keep break-point tensors at stable addresses.
 """
 
 import threading
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Callable, Optional
 
@@ -211,6 +212,23 @@ def _copy_output(dst: Any, src: Any) -> Any:
         return dst
 
     return src
+
+
+@contextmanager
+def eager_execution():
+    """Use only inside an eager break, after the CUDA segment has ended."""
+    from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph.context import (
+        suspend_breakable_cuda_graph,
+    )
+
+    if torch.cuda.is_current_stream_capturing():
+        raise RuntimeError("eager_execution cannot suspend an active CUDA capture")
+    token = _current_capture_var.set(None)
+    try:
+        with suspend_breakable_cuda_graph():
+            yield
+    finally:
+        _current_capture_var.reset(token)
 
 
 def eager_on_graph(enable: bool, capture_stub: Optional[Callable] = None):

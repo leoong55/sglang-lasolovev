@@ -51,6 +51,18 @@ def enable_breakable_cuda_graph():
         _in_breakable_cuda_graph = False
 
 
+@contextmanager
+def suspend_breakable_cuda_graph():
+    """Restore normal eager dispatch within a physical BCG break."""
+    global _in_breakable_cuda_graph
+    previous = _in_breakable_cuda_graph
+    _in_breakable_cuda_graph = False
+    try:
+        yield
+    finally:
+        _in_breakable_cuda_graph = previous
+
+
 BCG_FAILURE_HINT = (
     "1. change to tc_piecewise by --cuda-graph-backend-prefill=tc_piecewise\n"
     "2. disable the prefill CUDA graph by --cuda-graph-backend-prefill=disabled\n"
