@@ -85,7 +85,7 @@ def main():
                 upstream_pr_head=PR_HEAD,
                 gpu_validated=False,
                 image_built_here=False,
-                profile="glm53-cp8-dcp4-deepep-v4",
+                profile="glm53-cp8-dcp4-deepep-v4.1",
             ),
             indent=2,
         )

@@ -9,4 +9,4 @@ spec:
     spec:
       containers:
         - name: sglang
-          image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4-0bcd822377da
+          image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4.1-0bcd822377da

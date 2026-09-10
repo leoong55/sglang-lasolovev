@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from check_dependencies import check_runtime
 from install import install, package_root
 
 
@@ -95,9 +96,15 @@ def validate(argv):
     )
 
 
-if __name__ == "__main__":
+def main():
     install(package_root(), Path(__file__).resolve().parent, verify_only=True)
     validate(sys.argv[1:])
+    if os.environ.get("SGLANG_GLM53_DEEPEP_PREFILL", "0") == "1":
+        check_runtime()
     os.execv(
         sys.executable, [sys.executable, "-m", "sglang.launch_server", *sys.argv[1:]]
     )
+
+
+if __name__ == "__main__":
+    main()

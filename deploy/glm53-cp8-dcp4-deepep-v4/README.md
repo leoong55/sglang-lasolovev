@@ -1,4 +1,4 @@
-# GLM-5.3 CP8/DCP4: DeepEP prefill v4
+# GLM-5.3 CP8/DCP4: DeepEP prefill v4.1
 
 Кандидат на H200 поверх базы `0bcd822377da7b5718e674eaf9c870d349424dd1`.
 Сохраняет cumulative исправления v1–v3. Новый путь предназначен для полной
@@ -12,18 +12,24 @@ patch, Dockerfile и установщик. Бинарный image нужно с�
 
 ## Сборка и замена image
 
+v4.1 исправляет проверку зависимостей при сборке без GPU. Runtime-патч
+CP/DCP/MoE совпадает с v4. Импорт DeepEP выполняется при старте GPU-контейнера
+до загрузки модели; ошибки драйвера или ABI не подавляются. При отключённом
+`SGLANG_GLM53_DEEPEP_PREFILL=0` импорт DeepEP не требуется.
+
 Из распакованной директории:
 
 ```bash
+set -e
 sha256sum -c SHA256SUMS
-docker build -t i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4-0bcd822377da .
-docker push i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4-0bcd822377da
+docker build -t i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4.1-0bcd822377da .
+docker push i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4.1-0bcd822377da
 ```
 
 В текущем YAML Deployment `sglang-glm53-dcp4` изменить только image:
 
 ```yaml
-image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4-0bcd822377da
+image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4.1-0bcd822377da
 ```
 
 Прежний `command: python3 /opt/glm53-cp8-dcp4-v1/launch.py` поддерживается.
@@ -42,10 +48,12 @@ kubectl -n inf-glm53 patch deployment sglang-glm53-dcp4 --type=strategic --patch
 Ни сборка, ни push, ни изменение кластера автоматически не выполняются.
 
 База Dockerfile — исходный `v0.5.19-latest-0bcd822377da`, не образ v3.
-Установщик проверяет исходные хеши, включая новые файлы. Сборка также проверяет
-импорт legacy `deep_ep.Buffer` и CUTLASS W4AFP8 entrypoints; зависимости не
-обновляются. Если исходному образу не хватает DeepEP, сборка завершится явной
-ошибкой. Обновление DeepEP до произвольной latest-версии не предусмотрено.
+Установщик проверяет исходные хеши, включая новые файлы. На этапе сборки
+`check_dependencies.py --build` проверяет наличие `deep_ep` и `sgl_kernel`
+через `find_spec`, без их импорта и обращения к драйверу. Полный импорт legacy
+`deep_ep.Buffer` и CUTLASS W4AFP8 entrypoints перенесён в `launch.py`, когда
+контейнер уже получил GPU. Зависимости не обновляются. Отсутствующий пакет
+по-прежнему останавливает сборку, ошибка runtime-импорта — запуск.
 
 ## Что делает v4
 
@@ -147,15 +155,18 @@ CP-порядок всех рангов, пустые ранги, poisoned paddi
 addition, загрузка всех shared weights/scales без alias, отказ при пропуске
 веса, неизменный выбор decode и dense-веток. Установщик отдельно проверяется
 на добавлении файлов, повторном запуске и откате после ошибки записи.
+В v4.1 добавлены проверки сборки с пакетами, падающими при GPU-импорте,
+сохранения runtime-ошибки и выполнения проверки до запуска сервера.
+Всего прошли 44 CPU-проверки; Docker-сборка здесь не выполнялась.
 
 Для воспроизведения комплекта из GitHub checkout:
 
 ```bash
-python3 deploy/glm53-cp8-dcp4-deepep-v4/make_bundle.py /tmp/glm53-cp8-dcp4-deepep-v4
+python3 deploy/glm53-cp8-dcp4-deepep-v4/make_bundle.py /tmp/glm53-cp8-dcp4-deepep-v4.1
 ```
 
 При необходимости экспорт уже собранного image:
 
 ```bash
-docker save i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4-0bcd822377da | gzip -1 > glm53-deepep-v4-image.tar.gz
+docker save i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-cp8-dcp4-deepep-v4.1-0bcd822377da | gzip -1 > glm53-deepep-v4.1-image.tar.gz
 ```
