@@ -36,6 +36,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
 )
 from sglang.srt.distributed.parallel_state import GroupCoordinator
+from sglang.srt.layers.dcp.metadata import DCPPrefillGatherPlan
 from sglang.srt.runtime_context import get_parallel
 
 
@@ -264,6 +265,64 @@ def all_gather_q_for_mla_decode(
     return q_nope_out, q_pe
 
 
+def _gather_packed_prefix_with_plan(
+    persistent_kv: torch.Tensor,
+    local_indices: torch.Tensor,
+    destination: torch.Tensor,
+    plan: DCPPrefillGatherPlan,
+):
+    """Copy this layer's packed prefix directly into the prefill KV buffer.
+
+    The old generic path pads/slices every request on every layer. Aligned
+    prefixes need only one all-gather and a rank/row transpose. All transport
+    and copies use uint8, preserving scales and BF16 RoPE bytes exactly.
+    """
+    parallel = get_parallel()
+    local_tokens = plan.prefix_tokens // plan.dcp_size
+    if (
+        parallel.dcp_size != plan.dcp_size
+        or parallel.dcp_rank != plan.dcp_rank
+        or plan.prefix_tokens % plan.dcp_size != 0
+        or local_indices.numel() != local_tokens
+        or destination.shape[0] != plan.prefix_tokens
+        or persistent_kv.shape[1:] != destination.shape[1:]
+        or persistent_kv.device != destination.device
+        or persistent_kv.dtype != torch.uint8
+        or destination.dtype != torch.uint8
+    ):
+        raise RuntimeError("DCP packed prefix gather plan does not match this batch.")
+    if plan.prefix_tokens == 0:
+        return
+
+    # GroupCoordinator orders its collective with the caller's current stream.
+    # Workspaces are allocated and used on that same stream, and the result is
+    # copied out before this stream can overwrite them on the next layer.
+    stream_id = (
+        torch.cuda.current_stream(persistent_kv.device).cuda_stream
+        if persistent_kv.is_cuda
+        else None
+    )
+    key = (
+        persistent_kv.device,
+        stream_id,
+        id(parallel.dcp_group),
+        tuple(persistent_kv.shape[1:]),
+    )
+    workspace = plan.workspaces.get(key)
+    if workspace is None:
+        local = persistent_kv.new_empty((local_tokens, *persistent_kv.shape[1:]))
+        # Keep the existing DCP allocator policy (no symmetric memory pool).
+        gathered = persistent_kv.new_empty(destination.shape)
+        workspace = (local, gathered)
+        plan.workspaces[key] = workspace
+    local, gathered = workspace
+    torch.index_select(persistent_kv, 0, local_indices, out=local)
+    parallel.dcp_group.all_gather_into_tensor(gathered, local)
+    destination.view(local_tokens, plan.dcp_size, *destination.shape[1:]).copy_(
+        gathered.view(plan.dcp_size, local_tokens, *destination.shape[1:]).transpose(0, 1)
+    )
+
+
 def all_gather_kv_cache_for_mla_extend(
     token_to_kv_pool,
     attn_mqa,
@@ -274,6 +333,7 @@ def all_gather_kv_cache_for_mla_extend(
     kv_lora_rank,
     k_nope,
     k_pe,
+    dcp_prefix_gather_plan: Optional[DCPPrefillGatherPlan] = None,
 ):
     """Gather prefix KV and append the current CP-full extend KV.
 
@@ -284,19 +344,28 @@ def all_gather_kv_cache_for_mla_extend(
     use_packed_fp8_buffer = bool(
         getattr(token_to_kv_pool, "dsa_kv_cache_store_fp8", False)
     )
-    prefix_tokens = sum(int(x) for x in extend_prefix_lens_cpu)
-    extend_prefix_lens = torch.tensor(extend_prefix_lens_cpu, dtype=torch.int32)
+    prefix_tokens = dcp_extend_prefix_lens_sum
+    prefix_written = False
     if prefix_tokens == 0:
         gathered_kv = (
             dcp_kv_buffer.view(torch.uint8)[:0]
             if use_packed_fp8_buffer
             else dcp_kv_buffer[:0]
         )
+    elif use_packed_fp8_buffer and dcp_prefix_gather_plan is not None:
+        _gather_packed_prefix_with_plan(
+            token_to_kv_pool.get_key_buffer(attn_mqa.layer_id).view(torch.uint8),
+            dcp_local_prefix_kv_indices,
+            dcp_kv_buffer.view(torch.uint8)[:prefix_tokens],
+            dcp_prefix_gather_plan,
+        )
+        prefix_written = True
     elif use_packed_fp8_buffer:
         # A packed row mixes FP8 values, FP32 scales and BF16 RoPE bytes.
         # Gather it as uint8 so NCCL cannot reinterpret or convert any field.
         persistent_kv = token_to_kv_pool.get_key_buffer(attn_mqa.layer_id)
         local_prefix = persistent_kv.view(torch.uint8)[dcp_local_prefix_kv_indices]
+        extend_prefix_lens = torch.tensor(extend_prefix_lens_cpu, dtype=torch.int32)
         gathered_kv = all_gather_kv_cache_for_dcp(
             local_prefix,
             None,
@@ -304,6 +373,7 @@ def all_gather_kv_cache_for_mla_extend(
             prefix_starts_cpu=torch.zeros_like(extend_prefix_lens),
         )
     else:
+        extend_prefix_lens = torch.tensor(extend_prefix_lens_cpu, dtype=torch.int32)
         cache_k_nope, cache_k_rope = token_to_kv_pool.get_mla_kv_buffer(
             attn_mqa,
             dcp_local_prefix_kv_indices,
@@ -315,16 +385,17 @@ def all_gather_kv_cache_for_mla_extend(
             extend_prefix_lens,
             prefix_starts_cpu=torch.zeros_like(extend_prefix_lens),
         )
-    if gathered_kv.shape[0] != dcp_extend_prefix_lens_sum:
+    if not prefix_written and gathered_kv.shape[0] != dcp_extend_prefix_lens_sum:
         raise RuntimeError(
             "DCP gathered prefix length mismatch: "
             f"gathered={gathered_kv.shape[0]}, "
             f"expected={dcp_extend_prefix_lens_sum}."
         )
-    if use_packed_fp8_buffer:
-        dcp_kv_buffer.view(torch.uint8)[:dcp_extend_prefix_lens_sum] = gathered_kv
-    else:
-        dcp_kv_buffer[:dcp_extend_prefix_lens_sum] = gathered_kv
+    if not prefix_written:
+        if use_packed_fp8_buffer:
+            dcp_kv_buffer.view(torch.uint8)[:dcp_extend_prefix_lens_sum] = gathered_kv
+        else:
+            dcp_kv_buffer[:dcp_extend_prefix_lens_sum] = gathered_kv
 
     current_end = dcp_extend_prefix_lens_sum + k_nope.shape[0]
     if current_end > dcp_kv_buffer.shape[0]:

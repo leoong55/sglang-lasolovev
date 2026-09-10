@@ -14,10 +14,26 @@
 
 """Per-forward metadata for decode context parallel (DCP)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
+
+
+@dataclass(frozen=True)
+class DCPPrefillGatherPlan:
+    """Batch-local layout for packed prefixes with no per-request padding.
+
+    Every request prefix must be divisible by dcp_size. Concatenating the local
+    request prefixes then interleaving ranks restores the global prefix order.
+    Workspaces hold transient bytes, never cached KV values. Each CUDA stream
+    owns its workspaces; no mutable storage is shared with another stream.
+    """
+
+    prefix_tokens: int
+    dcp_size: int
+    dcp_rank: int
+    workspaces: dict = field(default_factory=dict, repr=False, compare=False)
 
 
 # NOTE: This is intentionally a standalone dataclass, NOT a subclass of
@@ -35,3 +51,4 @@ class DecodeContextParallelMetadata:
     dcp_kv_indices: Optional[torch.Tensor] = None
     dcp_local_prefix_kv_indices: Optional[torch.Tensor] = None
     dcp_extend_prefix_lens_sum: Optional[int] = None
+    dcp_prefix_gather_plan: Optional[DCPPrefillGatherPlan] = None

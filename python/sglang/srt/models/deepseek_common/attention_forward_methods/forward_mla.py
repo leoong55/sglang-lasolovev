@@ -704,6 +704,7 @@ class DeepseekMLAForwardMixin:
                         self.kv_lora_rank,
                         k_nope,
                         k_pe,
+                        dcp_prefix_gather_plan=forward_batch.attn_dcp_metadata.dcp_prefix_gather_plan,
                     )
             else:
                 logger.warning(

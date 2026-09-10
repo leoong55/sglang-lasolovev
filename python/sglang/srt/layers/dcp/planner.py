@@ -25,7 +25,10 @@ from sglang.kernels.ops.attention.dcp_kernels import (
     update_kv_lens_and_indices,
 )
 from sglang.srt.layers.dcp.layout import update_local_kv_lens_for_dcp
-from sglang.srt.layers.dcp.metadata import DecodeContextParallelMetadata
+from sglang.srt.layers.dcp.metadata import (
+    DCPPrefillGatherPlan,
+    DecodeContextParallelMetadata,
+)
 from sglang.srt.runtime_context import get_device, get_parallel
 
 
@@ -47,9 +50,7 @@ def prepare_decode_context_parallel_metadata(
     if not parallel.dcp_enabled:
         return None
     # dcp_kv_buffer tokens' layout
-    # [ rank0_r1.prefix_tokens, rank1_r1.prefix_tokens, ..., rank7_r1.prefix_tokens,
-    #   ...,
-    #   rank0_rn.prefix_tokens, rank1_rn.prefix_tokens, ..., rank7_rn.prefix_tokens,
+    # [ r1.prefix_tokens in logical token order, ..., rn.prefix_tokens,
     #   r1.extend_tokens, r2.extent_tokens, rn.extend_tokens ]
     extend_prefix_starts = torch.zeros(
         len(seq_lens),
@@ -63,10 +64,13 @@ def prepare_decode_context_parallel_metadata(
     )
     extend_cu_prefix_lens[1:] = torch.cumsum(extend_prefix_lens, dim=0)
     extend_cu_prefix_lens = extend_cu_prefix_lens[:-1]
-    extend_prefix_lens_sum = sum([i for i in extend_prefix_lens_cpu])
+    # Convert CPU lengths once, not once per attention layer. These are host
+    # lengths from the scheduler, so this does not synchronize a CUDA tensor.
+    prefix_lens = tuple(int(length) for length in extend_prefix_lens_cpu)
+    extend_prefix_lens_sum = sum(prefix_lens)
 
     dcp_prefix_kv_indices = torch.empty(
-        sum(extend_prefix_lens_cpu),
+        extend_prefix_lens_sum,
         dtype=torch.int32,
         device=get_device().device,
     )
@@ -132,6 +136,18 @@ def prepare_decode_context_parallel_metadata(
         dcp_kv_indices=dcp_kv_indices,
         dcp_local_prefix_kv_indices=dcp_local_prefix_kv_indices,
         dcp_extend_prefix_lens_sum=extend_prefix_lens_sum,
+        dcp_prefix_gather_plan=(
+            DCPPrefillGatherPlan(
+                prefix_tokens=extend_prefix_lens_sum,
+                dcp_size=parallel.dcp_size,
+                dcp_rank=parallel.dcp_rank,
+            )
+            if all(
+                length >= 0 and length % parallel.dcp_size == 0
+                for length in prefix_lens
+            )
+            else None
+        ),
     )
     return attn_dcp_metadata
 
