@@ -1,4 +1,4 @@
-name: Bootstrap pinned SGLang upstream
+name: Stage pinned SGLang upstream
 
 on:
   push:
@@ -20,9 +20,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: 0bcd822377da7b5718e674eaf9c870d349424dd1
-      BOOTSTRAP_SHA: ${{ github.sha }}
     steps:
-      - name: Import exact upstream commit and preserve bootstrap
+      - name: Stage source and history without active workflow files
         shell: bash
         run: |
           set -euo pipefail
@@ -32,19 +31,19 @@ jobs:
           cd transfer.git
           git remote add origin https://github.com/leoong55/sglang-lasolovev.git
           git remote add upstream https://github.com/sgl-project/sglang.git
-          git fetch origin refs/heads/main
-          CURRENT_SHA="$(git rev-parse FETCH_HEAD)"
-          test "$CURRENT_SHA" = "$BOOTSTRAP_SHA"
-          test "$(git rev-list --count "$BOOTSTRAP_SHA")" = 1
-          test "$(git ls-tree -r --name-only "$BOOTSTRAP_SHA")" = ".github/workflows/bootstrap-upstream.yml"
           git fetch upstream "$TARGET_SHA"
           test "$(git rev-parse FETCH_HEAD)" = "$TARGET_SHA"
-          git cat-file -e "$TARGET_SHA^{commit}"
-          git push --atomic origin \
-            --force-with-lease="refs/heads/main:$BOOTSTRAP_SHA" \
-            --force-with-lease="refs/heads/codex/bootstrap-upstream:" \
-            "$BOOTSTRAP_SHA:refs/heads/codex/bootstrap-upstream" \
-            "$TARGET_SHA:refs/heads/main"
-          REMOTE_SHA="$(git ls-remote origin refs/heads/main | cut -f1)"
-          test "$REMOTE_SHA" = "$TARGET_SHA"
-          echo "Imported upstream commit: $REMOTE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          git read-tree "$TARGET_SHA"
+          git ls-tree -r --name-only "$TARGET_SHA" .github/workflows |
+            git update-index --force-remove --stdin
+          STAGING_TREE="$(git write-tree)"
+          test -z "$(git ls-tree -r --name-only "$STAGING_TREE" .github/workflows)"
+          STAGING_SHA="$(echo 'Stage upstream source; workflow restoration requires the authorized connector' |
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit-tree "$STAGING_TREE" -p "$TARGET_SHA")"
+          git push origin \
+            --force-with-lease="refs/heads/codex/import-upstream:" \
+            "$STAGING_SHA:refs/heads/codex/import-upstream"
+          echo "Staging commit: $STAGING_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Original upstream commit: $TARGET_SHA" >> "$GITHUB_STEP_SUMMARY"
