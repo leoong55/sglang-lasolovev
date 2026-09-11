@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 
+from sglang.srt.layers.cp.glm53_deepep import enabled as deepep_opt_enabled
+
 
 def enabled() -> bool:
     return os.environ.get("SGLANG_GLM53_PREFILL_BCG") == "1"
@@ -39,7 +41,10 @@ def supports(server_args) -> bool:
         and cfg.quantization == "w4afp8"
         and cfg.dcp_comm_backend == "ag_rs"
         and resolved.attn_cp_size == 8
-        and resolved.moe_a2a_backend == "none"
+        and (
+            resolved.moe_a2a_backend == "none"
+            or (resolved.moe_a2a_backend == "deepep" and deepep_opt_enabled())
+        )
         and attention_backends_of(resolved)[0] == "flashmla_sparse_q8"
         and getattr(model, "num_hidden_layers", None) == 78
         and "GlmMoeDsaForCausalLM" in getattr(model, "architectures", [])

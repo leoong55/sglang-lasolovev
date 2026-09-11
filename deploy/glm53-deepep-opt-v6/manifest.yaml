@@ -1,0 +1,204 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sglang-glm53-dcp4-compile-cache
+  namespace: inf-glm53
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: ceph-filesystem
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang-glm53-dcp4
+  namespace: inf-glm53
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sglang-glm53-dcp4
+  template:
+    metadata:
+      labels:
+        app: sglang-glm53-dcp4
+        runtime-sglang/metrics: 'true'
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8080'
+        prometheus.io/path: /metrics
+        glm53-test-profile: cp8-dcp4-deepep-opt-v6-prefill-bcg8192
+    spec:
+      terminationGracePeriodSeconds: 120
+      imagePullSecrets:
+      - name: harbor-pull
+      containers:
+      - name: sglang
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-deepep-opt-v6-0bcd822377da
+        imagePullPolicy: IfNotPresent
+        command:
+        - python3
+        - /opt/glm53-cp8-dcp4-v1/launch.py
+        args:
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8080'
+        - --model-path
+        - /mnt/model-pvc-w4fp8
+        - --served-model-name
+        - GLM-5.3
+        - --trust-remote-code
+        - --tp-size
+        - '8'
+        - --ep-size
+        - '8'
+        - --dp-size
+        - '1'
+        - --enable-prefill-cp
+        - --cp-strategy
+        - interleave
+        - --enable-cp-decode-attn-tp
+        - --dcp-size
+        - '4'
+        - --dcp-comm-backend
+        - ag_rs
+        - --quantization
+        - w4afp8
+        - --kv-cache-dtype
+        - fp8_e4m3
+        - --dsa-prefill-backend
+        - flashmla_sparse_q8
+        - --dsa-decode-backend
+        - flashmla_kv
+        - --disable-shared-experts-fusion
+        - --page-size
+        - '64'
+        - --mem-fraction-static
+        - '0.80'
+        - --max-running-requests
+        - '32'
+        - --chunked-prefill-size
+        - '8192'
+        - --prefill-decode-interval
+        - '1'
+        - --moe-a2a-backend
+        - deepep
+        - --deepep-mode
+        - auto
+        - --cuda-graph-backend-prefill
+        - breakable
+        - --cuda-graph-max-bs-prefill
+        - '8192'
+        - --cuda-graph-bs-prefill
+        - '8192'
+        - --cuda-graph-backend-decode
+        - full
+        - --cuda-graph-max-bs-decode
+        - '32'
+        - --cuda-graph-bs-decode
+        - '1'
+        - '2'
+        - '4'
+        - '8'
+        - '16'
+        - '32'
+        - --reasoning-parser
+        - glm45
+        - --tool-call-parser
+        - glm47
+        - --enable-metrics
+        - --enable-cache-report
+        env:
+        - name: CUDA_DISABLE_CONTROL
+          value: 'true'
+        - name: SGLANG_ENABLE_CP_V2
+          value: '1'
+        - name: SGLANG_DSA_FUSE_TOPK
+          value: '0'
+        - name: SGLANG_CACHE_DIR
+          value: /mnt/cache/glm53-dcp4-v1/sglang
+        - name: SGLANG_DG_CACHE_DIR
+          value: /mnt/cache/glm53-dcp4-v1/deepgemm
+        - name: DG_JIT_CACHE_DIR
+          value: /mnt/cache/glm53-dcp4-v1/deepgemm
+        - name: TRITON_CACHE_DIR
+          value: /mnt/cache/glm53-dcp4-v1/triton
+        - name: TORCHINDUCTOR_CACHE_DIR
+          value: /mnt/cache/glm53-dcp4-v1/torchinductor
+        - name: TORCH_EXTENSIONS_DIR
+          value: /mnt/cache/glm53-dcp4-v1/torch-extensions
+        - name: CUDA_CACHE_PATH
+          value: /mnt/cache/glm53-dcp4-v1/cuda
+        - name: HF_HOME
+          value: /mnt/cache/glm53-dcp4-v1/huggingface
+        - name: XDG_CACHE_HOME
+          value: /mnt/cache/glm53-dcp4-v1/xdg
+        - name: SGLANG_GLM53_PREFILL_BCG
+          value: '1'
+        - name: SGLANG_GLM53_DEEPEP_OPT
+          value: '1'
+        ports:
+        - name: http
+          containerPort: 8080
+        resources:
+          requests:
+            cpu: '112'
+            memory: 1536Gi
+            nvidia.com/gpu: '8'
+          limits:
+            cpu: '112'
+            memory: 1536Gi
+            nvidia.com/gpu: '8'
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 720
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: model
+          mountPath: /mnt/model-pvc-w4fp8
+          readOnly: true
+        - name: compile-cache
+          mountPath: /mnt/cache
+        - name: shm
+          mountPath: /dev/shm
+      volumes:
+      - name: model
+        persistentVolumeClaim:
+          claimName: sglang-w4fp8-pvc
+      - name: compile-cache
+        persistentVolumeClaim:
+          claimName: sglang-glm53-dcp4-compile-cache
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 32Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang-glm53-dcp4
+  namespace: inf-glm53
+spec:
+  type: ClusterIP
+  selector:
+    app: sglang-glm53-dcp4
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http

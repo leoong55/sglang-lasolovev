@@ -581,6 +581,24 @@ class DeepseekV2MoE(nn.Module):
         super().__init__()
         self.tp_size = get_parallel().tp_size
         self.moe_ep_size = get_parallel().moe_ep_size
+        from sglang.srt.layers.cp.glm53_deepep import enabled as deepep_opt_enabled
+
+        self._cp_deepep_decode_partition = (
+            deepep_opt_enabled()
+            and dsa_enable_prefill_cp
+            and get_moe_a2a_backend().is_deepep()
+        )
+        if self._cp_deepep_decode_partition:
+            parallel = get_parallel()
+            assert (
+                parallel.tp_size == parallel.attn_cp_size == self.moe_ep_size == 8
+                and parallel.attn_dp_size == 1
+                and parallel.attn_tp_size == 1
+                and parallel.tp_rank == parallel.attn_cp_rank
+                and not is_nextn
+                and "GlmMoeDsaForCausalLM" in getattr(config, "architectures", [])
+                and getattr(quant_config, "get_name", lambda: None)() == "w4afp8"
+            ), "GLM53 DeepEP decode partition requires full GLM W4AFP8 TP=CP=EP=8 DP1"
         self.routed_scaling_factor = config.routed_scaling_factor
         self.n_shared_experts = config.n_shared_experts
 
@@ -1263,6 +1281,22 @@ class DeepseekV2MoE(nn.Module):
         return final_hidden_states
 
     def forward_deepep(
+        self,
+        hidden_states: torch.Tensor,
+        forward_batch: ForwardBatch,
+        input_ids_global: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if self._cp_deepep_decode_partition and (
+            forward_batch.forward_mode.is_decode()
+            or forward_batch.forward_mode.is_idle()
+        ):
+            from sglang.srt.layers.cp.glm53_deepep import forward_partitioned_decode
+
+            assert not self.is_hash, "GLM53 decode partition does not support hash routing"
+            return forward_partitioned_decode(self, hidden_states, forward_batch)
+        return self._forward_deepep_impl(hidden_states, forward_batch, input_ids_global)
+
+    def _forward_deepep_impl(
         self,
         hidden_states: torch.Tensor,
         forward_batch: ForwardBatch,

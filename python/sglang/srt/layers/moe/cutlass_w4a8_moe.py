@@ -5,6 +5,7 @@ from typing import Optional
 
 import torch
 
+from sglang.srt.layers.cp.glm53_deepep import enabled as glm53_deepep_opt_enabled
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import is_cuda, is_cuda_alike
 
@@ -316,46 +317,69 @@ def cutlass_w4a8_moe_deepep_normal(
     assert a_strides2.shape[0] == w2_q.shape[0], "A Strides 2 expert number mismatch"
     assert b_strides2.shape[0] == w2_q.shape[0], "B Strides 2 expert number mismatch"
     num_experts = w1_q.size(0)
-    m = a.size(0)
-    k = w1_q.size(2) * 2  # w1_q is transposed and packed
-    n = w2_q.size(2) * 2  # w2_q is transposed and packed
-    topk = topk_ids_.size(1)
-
-    num_experts = w1_q.size(0)
-    m = a.size(0)
-    k = w1_q.size(2) * 2
+    m, k = a.shape
     n = w2_q.size(2) * 2
     topk = topk_ids_.size(1)
     device = a.device
-
-    reorder_topk_ids, src2dst, _ = deepep_run_moe_deep_preprocess(
-        topk_ids_, num_experts
-    )
-    num_total_tokens = reorder_topk_ids.numel()
-    gateup_input_pre_reorder = torch.empty(
-        (int(num_total_tokens), a.shape[1]),
-        device=device,
-        dtype=a.dtype,
-    )
-    deepep_permute_triton_kernel[(a.shape[0],)](
-        a,
-        gateup_input_pre_reorder,
-        src2dst,
-        topk_ids_.to(torch.int64),
-        None,
-        topk,
-        a.shape[1],
-        BLOCK_SIZE=512,
-    )
-    gateup_input = torch.empty(
-        gateup_input_pre_reorder.shape, dtype=torch.float8_e4m3fn, device=device
-    )
-    per_tensor_quant_fp8(gateup_input_pre_reorder, gateup_input, a1_scale.float(), True)
-    del gateup_input_pre_reorder
-    local_topk_ids = topk_ids_
+    optimized = glm53_deepep_opt_enabled() and _is_cuda
+    if optimized and m == 0:
+        return torch.empty_like(a)
     local_topk_ids = (
-        torch.where(local_topk_ids == -1, num_experts, topk_ids_).to(torch.int32)
-    ).contiguous()
+        torch.where(topk_ids_ == -1, num_experts, topk_ids_)
+        .to(torch.int32)
+        .contiguous()
+    )
+
+    if optimized:
+        # Sorting the invalid sentinel LAST packs valid routes at offset zero.
+        # No GPU scalar is converted to a Python slice/size. GEMMs use the
+        # live expert_offsets; the unused capacity is never read by consumers.
+        src2dst = cutlass_w4_run_moe_ep_preproess(local_topk_ids)
+        gateup_input = torch.empty(
+            (m * topk, k), device=device, dtype=torch.float8_e4m3fn
+        )
+        pre_reorder_for_cutlass_moe(
+            a,
+            gateup_input,
+            src2dst,
+            local_topk_ids,
+            a1_scale,
+            num_experts,
+            topk,
+            m,
+            k,
+            clamp_fp8=True,
+        )
+        # The existing DeepEP combine kernel recognizes invalid routes by -1
+        # in the map, unlike the ordinary kernel's local-expert sentinel.
+        src2dst = torch.where(local_topk_ids.view(-1) == num_experts, -1, src2dst)
+    else:
+        reorder_topk_ids, src2dst, _ = deepep_run_moe_deep_preprocess(
+            topk_ids_, num_experts
+        )
+        num_total_tokens = reorder_topk_ids.numel()
+        gateup_input_pre_reorder = torch.empty(
+            (int(num_total_tokens), a.shape[1]),
+            device=device,
+            dtype=a.dtype,
+        )
+        deepep_permute_triton_kernel[(a.shape[0],)](
+            a,
+            gateup_input_pre_reorder,
+            src2dst,
+            topk_ids_.to(torch.int64),
+            None,
+            topk,
+            a.shape[1],
+            BLOCK_SIZE=512,
+        )
+        gateup_input = torch.empty(
+            gateup_input_pre_reorder.shape, dtype=torch.float8_e4m3fn, device=device
+        )
+        per_tensor_quant_fp8(
+            gateup_input_pre_reorder, gateup_input, a1_scale.float(), True
+        )
+        del gateup_input_pre_reorder
 
     a_map = torch.empty((local_topk_ids.numel()), dtype=torch.int32, device=device)
     c_map = torch.empty((local_topk_ids.numel()), dtype=torch.int32, device=device)
@@ -371,7 +395,9 @@ def cutlass_w4a8_moe_deepep_normal(
         k,
     )
     c1 = torch.empty((m * topk, n * 2), device=device, dtype=torch.bfloat16)
-    c2 = torch.zeros((m * topk, k), device=device, dtype=torch.bfloat16)
+    c2 = (torch.empty if optimized else torch.zeros)(
+        (m * topk, k), device=device, dtype=torch.bfloat16
+    )
 
     cutlass_w4a8_moe_mm(
         c1,
@@ -388,13 +414,27 @@ def cutlass_w4a8_moe_deepep_normal(
         128,
         topk,
     )
-    intermediate = torch.empty((m * topk, n), device=device, dtype=torch.bfloat16)
-    silu_and_mul(c1, intermediate)
+    if optimized:
+        intermediate_q = torch.empty(
+            (m * topk, n), device=device, dtype=torch.float8_e4m3fn
+        )
+        silu_mul_static_tensorwise_quant_for_cutlass_moe(
+            c1,
+            intermediate_q,
+            a2_scale.float(),
+            expert_offsets[-1:],
+            m * topk,
+            n,
+            round_product=True,
+        )
+    else:
+        intermediate = torch.empty((m * topk, n), device=device, dtype=torch.bfloat16)
+        silu_and_mul(c1, intermediate)
 
-    intermediate_q = torch.empty(
-        intermediate.shape, dtype=torch.float8_e4m3fn, device=device
-    )
-    per_tensor_quant_fp8(intermediate, intermediate_q, a2_scale.float(), True)
+        intermediate_q = torch.empty(
+            intermediate.shape, dtype=torch.float8_e4m3fn, device=device
+        )
+        per_tensor_quant_fp8(intermediate, intermediate_q, a2_scale.float(), True)
 
     cutlass_w4a8_moe_mm(
         c2,
