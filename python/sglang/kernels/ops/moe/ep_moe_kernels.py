@@ -214,6 +214,7 @@ def pre_reorder_triton_kernel_for_cutlass_moe(
     hidden_size,
     BLOCK_SIZE: tl.constexpr,
     NUM_STAGES: tl.constexpr,
+    CLAMP_FP8: tl.constexpr,
 ):
     OutDtype = gateup_input_ptr.dtype.element_ty
 
@@ -238,7 +239,10 @@ def pre_reorder_triton_kernel_for_cutlass_moe(
         src_ptr_offs = input_ptr + src_idx * hidden_size + offset
         dst_ptr_offs = gateup_input_ptr + offset
         in_data = tl.load(src_ptr_offs, mask=mask).to(tl.float32)
-        out_data = (in_data * a1_scale).to(OutDtype)
+        scaled = in_data * a1_scale
+        if CLAMP_FP8:
+            scaled = tl.clamp(scaled, -448.0, 448.0)
+        out_data = scaled.to(OutDtype)
         for idx in range(topk):
             expert_id = tl.load(token_topk_ids_ptr + idx)
             if expert_id != num_local_experts:
@@ -256,6 +260,7 @@ def pre_reorder_for_cutlass_moe(
     topk,
     num_tokens,
     hidden_size,
+    clamp_fp8: bool = False,
 ):
     grid, block_dim = _get_launch_config_2d(input.device, num_tokens, hidden_size)
 
@@ -271,6 +276,7 @@ def pre_reorder_for_cutlass_moe(
         hidden_size=hidden_size,
         BLOCK_SIZE=block_dim,
         NUM_STAGES=3,
+        CLAMP_FP8=clamp_fp8,
     )
 
 
@@ -771,6 +777,7 @@ def silu_mul_static_tensorwise_quant_triton_kernel_for_cutlass_moe(
     intermediate_size,
     BLOCK_SIZE: tl.constexpr,
     NUM_STAGES: tl.constexpr,
+    ROUND_PRODUCT: tl.constexpr,
 ):
     OutDtype = output_ptr.dtype.element_ty
 
@@ -791,7 +798,14 @@ def silu_mul_static_tensorwise_quant_triton_kernel_for_cutlass_moe(
         offs = ids + token_ids * intermediate_size
         gate = tl.load(gate_ptr + offs, mask=mask, other=0.0).to(tl.float32)
         up = tl.load(up_ptr + offs, mask=mask, other=0.0).to(tl.float32)
-        output = gate / (1 + tl.exp(-gate)) * up * scale
+        product = gate / (1 + tl.exp(-gate)) * up
+        if ROUND_PRODUCT:
+            # CUDA silu_and_mul writes BF16 before static FP8 quantization.
+            # Preserve that rounding boundary while removing the BF16 buffer.
+            product = product.to(input_ptr.dtype.element_ty).to(tl.float32)
+        output = product * scale
+        if ROUND_PRODUCT:
+            output = tl.clamp(output, -448.0, 448.0)
         tl.store(output_ptr + ids, output.to(OutDtype), mask=mask)
 
 
@@ -802,6 +816,7 @@ def silu_mul_static_tensorwise_quant_for_cutlass_moe(
     num_tokens_tensor: torch.Tensor,
     expected_num_tokens: int,
     intermediate_size: int,
+    round_product: bool = False,
 ):
     grid, block_dim = _get_launch_config_1d(
         input.device, expected_num_tokens * intermediate_size
@@ -815,6 +830,7 @@ def silu_mul_static_tensorwise_quant_for_cutlass_moe(
         intermediate_size=intermediate_size,
         BLOCK_SIZE=block_dim,
         NUM_STAGES=3,
+        ROUND_PRODUCT=round_product,
     )
 
 
