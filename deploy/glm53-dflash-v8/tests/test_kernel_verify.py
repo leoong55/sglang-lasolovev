@@ -44,7 +44,9 @@ class VerifyIndexTest(unittest.TestCase):
                             virtual = cpu_table[row][logical]
                             if virtual % 4 == rank:
                                 expected[row, col] = virtual // 4
-                torch.testing.assert_close(got, expected)
+                torch.testing.assert_close(
+                    got, expected, msg=lambda msg: f"width={width}, rank={rank}, first rows={got[:, :18].tolist()}\n{msg}"
+                )
 
 
 if __name__ == "__main__":
