@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 class DSAIndexerPoolHost(HostKVCache):
-    """Host-side DSA index buffers only. Slot layout matches the anchor MLA host pool."""
+    """Replicated DSA index buffers indexed in the anchor's logical slot space."""
 
     device_pool: DSATokenToKVPool
 
@@ -61,7 +61,11 @@ class DSAIndexerPoolHost(HostKVCache):
         allocator_type: str = "default",
     ):
         self.device_pool = device_pool
-        self.page_size = anchor_host.page_size
+        # MLA data is rank-local under DCP, but the indexer stores every token.
+        # Its physical device pages remain 64 tokens, while the radix allocator
+        # uses widened (e.g. 256-token) logical pages. Copy all four index pages;
+        # do not apply the MLA host's owner filtering or divide token IDs by DCP.
+        self.page_size = device_pool.page_size
         self.layout = layout
         self.pin_memory = pin_memory
         self.device = device
@@ -80,8 +84,10 @@ class DSAIndexerPoolHost(HostKVCache):
             self.index_head_dim
             + self.index_head_dim // self.indexer_quant_block_size * 4
         )
-        self.size = anchor_host.size
-        self.page_num = anchor_host.page_num
+        self.size = anchor_host.logical_size
+        if self.size % self.page_size:
+            raise ValueError("DSA indexer host capacity must contain whole device pages")
+        self.page_num = self.size // self.page_size
 
         self.indexer_page_stride_size = (
             self.indexer_size_per_token * self.page_size * self.indexer_dtype.itemsize
