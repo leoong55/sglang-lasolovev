@@ -1,0 +1,68 @@
+name: GLM53 PP4 colleague image
+on:
+  pull_request:
+    branches: [work/glm53-upstream-0bcd822377da]
+    paths:
+      - 'python/sglang/srt/managers/**'
+      - 'deploy/glm53-pp4-colleague-v1/**'
+      - '.github/workflows/glm53-pp4-image.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: glm53-pp4-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  image:
+    if: github.repository == 'leoong55/sglang-lasolovev' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: CPU policy and packaging checks
+        run: python3 -m unittest discover -s deploy/glm53-pp4-colleague-v1/tests -v
+      - name: Image metadata
+        id: meta
+        shell: bash
+        run: |
+          commit=$(git rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/leoong55/sglang-lasolovev:glm53-pp4-${commit:0:12}" >> "$GITHUB_OUTPUT"
+      - name: Make disk space for the CUDA base image
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish exact commit image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/glm53-pp4-colleague-v1/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ghcr.io/leoong55/sglang-lasolovev:glm53-pp4-colleague-v1
+          build-args: |
+            BASE_IMAGE=${{ vars.GLM53_PP4_BASE_IMAGE || 'lmsysorg/sglang:v0.5.19-latest-0bcd822377da' }}
+            SOURCE_COMMIT=${{ steps.meta.outputs.commit }}
+      - name: Record pull reference
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Image: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+          echo 'GPU model-load and 40-request validation are still required.' >> "$GITHUB_STEP_SUMMARY"
