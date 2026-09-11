@@ -8,6 +8,9 @@ repos:
       - id: check-symlinks
       - id: destroyed-symlinks
       - id: trailing-whitespace
+        # Unified diff blank context lines contain a required leading space.
+        # The exact-base installer and packaging tests validate this payload.
+        exclude: ^deploy/glm53-pp4-colleague-v1/runtime\.patch$
       - id: end-of-file-fixer
       - id: check-yaml
         args: [--allow-multiple-documents]
