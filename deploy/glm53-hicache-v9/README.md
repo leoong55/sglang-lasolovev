@@ -5,6 +5,30 @@ Third stage, based on the DFlash PR. Full target model
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and
 FA4 draft KV in its upstream compute dtype. Initial chunk: 16384.
 
+## v9.4: compiler gate and short-prefill LSE correctness
+
+The next H200 log reaches actual 16k breakable prefill capture, then Triton
+rejects the CP split loop: its carry starts as int32 but captured lengths are
+int64. The carry and loaded operands now remain int64; caller output dtypes
+are preserved. Both CP-v2 and legacy callers are covered with real kernels.
+No memory-fraction adjustment can fix this compiler error.
+
+The audit also found a separate numerical bug on short prefill tails that
+cannot use CP. Dispatch falls back from Q8 to FlashMLA KV, but the DCP reducer
+selected the LSE base from the configured Q8 backend. It now uses the same
+per-batch selector as metadata and attention. This avoids applying exp2 to
+natural-log LSE. See [AUDIT.md](AUDIT.md) for scope and remaining hardware gates.
+
+`kernel_preflight.py` compiles 26 CP/DCP kernel specializations to SM90 PTX
+and cubin without a GPU, model weights or CUDA context. Docker builds run it
+against the installed image's Triton after patch verification; CI additionally
+runs it with Triton 3.1.0. Numeric interpreter tests exercise CP splitting on
+all eight ranks and actual AG+RS/A2A LSE kernels. Compiler and interpreter
+checks complement one another; neither is a full H200 integration run.
+
+Build tag: `glm53-hicache-v9.4-0bcd822377da`. Keep 16k and the current
+`mem-fraction-static 0.75` for the next comparison.
+
 ## v9.3: causal verify capture and the model-stage prefill graph rule
 
 The v9.2 H200 log passes KV allocation and attention-backend profile validation,

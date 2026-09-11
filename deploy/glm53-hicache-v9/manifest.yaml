@@ -39,7 +39,7 @@ spec:
       - name: harbor-pull
       containers:
       - name: sglang
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.3-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.4-0bcd822377da
         imagePullPolicy: IfNotPresent
         command:
         - python3

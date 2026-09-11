@@ -16,10 +16,13 @@ def dsa_cp_round_robin_split_q_seqs_kernel(
     cp_size: tl.constexpr,
     cp_rank: tl.constexpr,
 ):
-    extra_seq = 0
+    # Capture metadata uses int64 lengths; eager batches may use int32.
+    # A Python zero starts as int32 and cannot widen across a Triton loop.
+    # Keep the carry and its operands int64 without narrowing caller lengths.
+    extra_seq = tl.full((), 0, tl.int64)
     bs_idx = 0
     for bs in range(tokens):
-        cur_len = tl.load(in_seqs_ptr + bs)
+        cur_len = tl.load(in_seqs_ptr + bs).to(tl.int64)
         cur_len += extra_seq
         cur_seq = cur_len // cp_size + (cur_len % cp_size > cp_rank)
         if cur_seq > 0:

@@ -4,6 +4,7 @@ LABEL org.opencontainers.image.source="https://github.com/leoong55/sglang-lasolo
 USER root
 COPY . /opt/glm53-cp8-dcp4-v1/
 RUN python3 /opt/glm53-cp8-dcp4-v1/install.py \
-    && python3 /opt/glm53-cp8-dcp4-v1/install.py --verify-only
+    && python3 /opt/glm53-cp8-dcp4-v1/install.py --verify-only \
+    && python3 /opt/glm53-cp8-dcp4-v1/kernel_preflight.py
 ENTRYPOINT ["python3", "/opt/glm53-cp8-dcp4-v1/launch.py"]
 CMD []
