@@ -3819,8 +3819,14 @@ class Scheduler(
             assert self.chunked_req is None
             self.chunked_req = adder.new_chunked_req
 
-        if self.chunked_req is not None:
-            self.chunked_req.inflight_middle_chunks += 1
+        batch_chunked_req = self.chunked_req
+        if full_need_budget is not None and batch_chunked_req not in can_run_set:
+            # A parked chunk owns its scheduler slot, but no work for it was
+            # submitted in this batch. Do not increment its in-flight count or
+            # mark a short-only bypass batch as an intermediate prefill chunk.
+            batch_chunked_req = None
+        if batch_chunked_req is not None:
+            batch_chunked_req.inflight_middle_chunks += 1
 
         set_time_batch(can_run_list, "set_forward_entry_time")
 
@@ -3833,11 +3839,11 @@ class Scheduler(
             self.model_config,
             self.enable_overlap,
             self.spec_algorithm,
-            chunked_req=self.chunked_req,
+            chunked_req=batch_chunked_req,
         )
 
         new_batch.contains_last_prefill_chunk = (
-            self.chunked_req is None or len(can_run_list) != 1
+            batch_chunked_req is None or len(can_run_list) != 1
         )
 
         if self.enable_hierarchical_cache:

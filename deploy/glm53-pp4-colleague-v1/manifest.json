@@ -4,7 +4,7 @@
     {
       "path": "srt/managers/scheduler.py",
       "base_sha256": "3a12fdfb9c21571d8007ba60aedd7e84b67636583bac8243373c75d6a2ab324e",
-      "patched_sha256": "31054a5c605fae1ad4803644977781630377372fde568b1d3f1a64b08f3269e0"
+      "patched_sha256": "3d9018b4e2cff23e329374f525a83f1ab0f5ddd172fd5e1eed6f4c93a9900bdd"
     },
     {
       "path": "srt/managers/schedule_policy.py",

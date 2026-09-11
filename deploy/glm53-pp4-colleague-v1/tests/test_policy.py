@@ -181,5 +181,87 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(a.budget_state(), Result.OTHER)
 
 
+
+class SchedulerChunkAccountingTests(unittest.TestCase):
+    def test_parked_chunk_is_not_counted_as_submitted_work(self):
+        tree = ast.parse((POLICY / "scheduler.py").read_text())
+        # Execute the actual scheduler's batch-construction block with a fake
+        # batch factory. This exercises the in-flight counter and the metadata
+        # consumed by PP result processing, without importing CUDA services.
+        body = next(
+            n.body
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef)
+            and any(
+                isinstance(s, ast.Assign)
+                and any(
+                    isinstance(t, ast.Name) and t.id == "batch_chunked_req"
+                    for t in s.targets
+                )
+                for s in n.body
+            )
+        )
+        start = next(
+            i
+            for i, s in enumerate(body)
+            if isinstance(s, ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "batch_chunked_req"
+                for t in s.targets
+            )
+        )
+        end = next(
+            i
+            for i, s in enumerate(body)
+            if isinstance(s, ast.Assign)
+            and any(
+                isinstance(t, ast.Attribute) and t.attr == "contains_last_prefill_chunk"
+                for t in s.targets
+            )
+        )
+        code = compile(
+            ast.Module(body=body[start : end + 1], type_ignores=[]),
+            "scheduler_batch_construction",
+            "exec",
+        )
+
+        class Chunk:
+            inflight_middle_chunks = 0
+
+        for selected_chunk, policy_on, expected_count in [
+            (False, True, 0),
+            (True, True, 1),
+            (False, False, 1),
+        ]:
+            chunk = Chunk()
+            selected = [chunk] if selected_chunk else [object()]
+            scheduler = NS(
+                chunked_req=chunk,
+                req_to_token_pool=None,
+                token_to_kv_pool_allocator=None,
+                tree_cache=None,
+                model_config=None,
+                enable_overlap=False,
+                spec_algorithm=None,
+            )
+            frame = dict(
+                self=scheduler,
+                full_need_budget=object() if policy_on else None,
+                can_run_set=set(selected),
+                can_run_list=selected,
+                set_time_batch=lambda *args: None,
+                ScheduleBatch=NS(init_new=lambda *args, **kwargs: NS(**kwargs)),
+            )
+            exec(code, frame)
+            self.assertEqual(chunk.inflight_middle_chunks, expected_count)
+            self.assertIs(scheduler.chunked_req, chunk)
+            self.assertEqual(
+                frame["new_batch"].chunked_req is chunk, bool(expected_count)
+            )
+            self.assertEqual(
+                frame["new_batch"].contains_last_prefill_chunk, not bool(expected_count)
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
