@@ -55,7 +55,10 @@ def supports(server_args) -> bool:
         and cfg.dcp_comm_backend == "ag_rs"
         and resolved.attn_cp_size == 8
         and resolved.moe_a2a_backend == "none"
-        and attention_backends_of(resolved)[0] == "flashmla_sparse_q8"
+        # Generic dispatch selects DSA; its kernels have separate selectors.
+        and attention_backends_of(resolved) == ("dsa", "dsa")
+        and resolved.dsa_prefill_backend == "flashmla_sparse_q8"
+        and resolved.dsa_decode_backend == "flashmla_kv"
         and getattr(model, "num_hidden_layers", None) == 78
         and "GlmMoeDsaForCausalLM" in getattr(model, "architectures", [])
     )

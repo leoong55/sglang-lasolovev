@@ -5,6 +5,31 @@ Third stage, based on the DFlash PR. Full target model
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and
 FA4 draft KV in its upstream compute dtype. Initial chunk: 16384.
 
+## v9.2: recognize DSA dispatch and its internal kernels separately
+
+The next H200 log confirms the v9.1 pool fix: one draft KV head per GPU,
+2.42 GiB each for K and V, with about 34 GiB still free after allocation.
+Startup then failed the DFlash/HiCache profile check. Both the DFlash and
+prefill-graph gates incorrectly compared generic attention backends against
+internal DSA kernel names. The generic pair is `dsa` / `dsa`; the separate
+DSA selectors are `flashmla_sparse_q8` / `flashmla_kv`.
+
+Both gates now validate those fields separately through resolved views.
+This also fixes prefill graphs being disabled by CP/DCP compatibility checks
+despite an explicit `breakable` request. The HiCache requirements remain
+unified radix, `cache`, `write_through`, `layer_first` and `direct`.
+
+Six CPU regressions execute the actual resolution views, backend selector,
+DSA startup gate and graph-compatibility hook. They reproduce the old startup
+exception and graph disable decision, and check both corrected paths and
+rejection of other backends, models, topologies and cache policies. Existing
+graph tests now use the real generic backend selector instead of a mock
+returning internal DSA names. Full CUDA graph capture is still unvalidated.
+
+Build tag: `glm53-hicache-v9.2-0bcd822377da`. The example manifest now uses
+`mem-fraction-static 0.75`, matching the latest operator log. For the next
+retry, change only the image in the existing deployment.
+
 ## v9.1: fix draft KV allocation under target prefill CP
 
 The first H200 startup log exposed an allocation mismatch: DFlashAttention,
@@ -22,10 +47,7 @@ Four CPU regression tests execute the actual sizing, shape and budget methods;
 the old code fails them. They cover the reported geometry, CP/DCP combinations
 and preservation of the other model paths. This is not an H200 startup test.
 
-Build tag: `glm53-hicache-v9.1-0bcd822377da`. For the first retry, keep the
-operator's current lowered `mem-fraction-static` and change only the image
-in the existing deployment. Applying the full example manifest would reset
-that setting to its example value. FA4 draft KV stays BF16; target KV stays FP8.
+FA4 draft KV stays BF16; target KV stays FP8.
 
 ## What changed and why
 

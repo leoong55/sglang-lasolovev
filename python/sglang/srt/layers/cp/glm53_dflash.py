@@ -21,7 +21,10 @@ def supports_dflash_dcp(server_args):
         and cfg.kv_cache_dtype == "fp8_e4m3" and cfg.page_size == 64
         and cfg.quantization == "w4afp8"
         and resolved.attn_cp_size == 8 and resolved.moe_a2a_backend == "none"
-        and attention_backends_of(resolved) == ("flashmla_sparse_q8", "flashmla_kv")
+        # Generic dispatch selects DSA; its kernels have separate selectors.
+        and attention_backends_of(resolved) == ("dsa", "dsa")
+        and resolved.dsa_prefill_backend == "flashmla_sparse_q8"
+        and resolved.dsa_decode_backend == "flashmla_kv"
         and getattr(model, "num_hidden_layers", None) == 78
         and "GlmMoeDsaForCausalLM" in getattr(model, "architectures", [])
     )

@@ -32,14 +32,14 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: /metrics
-        glm53-test-profile: cp8-dcp4-hicache-v9.1-prefill-bcg16384
+        glm53-test-profile: cp8-dcp4-hicache-v9.2-prefill-bcg16384
     spec:
       terminationGracePeriodSeconds: 120
       imagePullSecrets:
       - name: harbor-pull
       containers:
       - name: sglang
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.1-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.2-0bcd822377da
         imagePullPolicy: IfNotPresent
         command:
         - python3
@@ -80,7 +80,7 @@ spec:
         - --page-size
         - '64'
         - --mem-fraction-static
-        - '0.80'
+        - '0.75'
         - --max-running-requests
         - '32'
         - --chunked-prefill-size

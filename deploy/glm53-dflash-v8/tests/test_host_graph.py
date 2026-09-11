@@ -190,7 +190,27 @@ class GraphTests(unittest.TestCase):
             quantization="w4afp8",
             dcp_comm_backend="ag_rs",
         )
-        resolved = SimpleNamespace(attn_cp_size=8, moe_a2a_backend="none")
+        resolved = SimpleNamespace(
+            attn_cp_size=8,
+            moe_a2a_backend="none",
+            attention_backend="dsa",
+            prefill_attention_backend=None,
+            decode_attention_backend=None,
+            dsa_prefill_backend="flashmla_sparse_q8",
+            dsa_decode_backend="flashmla_kv",
+        )
+        backend_tree = ast.parse(
+            (ROOT / "srt/arg_groups/model_override_base.py").read_text()
+        )
+        backend_fn = next(
+            n for n in backend_tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "attention_backends_of"
+        )
+        backend_ns = {"Any": object}
+        exec(
+            compile(ast.Module(body=[backend_fn], type_ignores=[]), "backends", "exec"),
+            backend_ns,
+        )
         model = SimpleNamespace(
             num_hidden_layers=78, architectures=["GlmMoeDsaForCausalLM"]
         )
@@ -198,7 +218,7 @@ class GraphTests(unittest.TestCase):
             resolving_view=lambda s: cfg,
             resolved_view=lambda s: resolved,
             model_config_of=lambda s: SimpleNamespace(hf_config=model),
-            attention_backends_of=lambda s: ("flashmla_sparse_q8", "flashmla_kv"),
+            attention_backends_of=backend_ns["attention_backends_of"],
         )
         with (
             patch.dict(sys.modules, {"sglang.srt.arg_groups.overrides": overrides}),
