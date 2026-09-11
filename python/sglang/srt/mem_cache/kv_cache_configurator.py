@@ -1813,13 +1813,30 @@ class KVCacheConfigurator:
             pool_kwargs["quant_method"] = quant_method
         else:
             pool_kwargs["post_capture_active"] = self.post_capture_kv_active
+        parallel = get_parallel()
+        if self.is_draft_worker and self.spec_algorithm.is_dflash_family():
+            # DFlashAttention and its FA backend shard heads over the full TP
+            # group. Target prefill CP may reduce attn_tp_size to one; using
+            # that group here overallocates heads and disagrees with the draft
+            # budget. DCP still widens the token/page space independently.
+            head_num = self.model_config.get_num_kv_heads(parallel.tp_size)
+            logger.info(
+                "DFLASH KV pool: heads=%d, tokens=%d, page_size=%d, layers=%d, dtype=%s",
+                head_num,
+                max_total_num_tokens,
+                self.pool_page_size,
+                self.layer_info.num_effective_layers,
+                self.kv_cache_dtype,
+            )
+        else:
+            head_num = self.model_config.get_num_kv_heads(
+                parallel.attn_tp_size, parallel.attn_dcp_size
+            )
         token_to_kv_pool = pool_cls(
             max_total_num_tokens,
             page_size=self.pool_page_size,
             dtype=self.kv_cache_dtype,
-            head_num=self.model_config.get_num_kv_heads(
-                get_parallel().attn_tp_size, get_parallel().attn_dcp_size
-            ),
+            head_num=head_num,
             head_dim=self.model_config.head_dim,
             v_head_dim=self.model_config.v_head_dim,
             layer_num=self.layer_info.num_effective_layers,

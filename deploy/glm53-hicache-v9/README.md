@@ -5,6 +5,28 @@ Third stage, based on the DFlash PR. Full target model
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and
 FA4 draft KV in its upstream compute dtype. Initial chunk: 16384.
 
+## v9.1: fix draft KV allocation under target prefill CP
+
+The first H200 startup log exposed an allocation mismatch: DFlashAttention,
+FA4 and the draft memory budget use the full TP group (one KV head per GPU
+with eight total heads and TP8), but the MHA pool used the target attention
+group (eight heads with CP8). At 493312 target slots and DCP4, that inflated
+the six-layer BF16 draft K/V buffers from about 5.65 GiB to 45.17 GiB per GPU.
+The OOM happened during draft pool construction, before HiCache or graphs.
+
+The DFlash-family draft MHA pool now uses full TP for head sharding, while
+retaining DCP's widened virtual token and page capacity. Other MHA pool paths
+keep their existing geometry. A startup log prints heads, tokens, page size,
+layers and dtype; this profile must report `heads=1` and `layers=6`.
+Four CPU regression tests execute the actual sizing, shape and budget methods;
+the old code fails them. They cover the reported geometry, CP/DCP combinations
+and preservation of the other model paths. This is not an H200 startup test.
+
+Build tag: `glm53-hicache-v9.1-0bcd822377da`. For the first retry, keep the
+operator's current lowered `mem-fraction-static` and change only the image
+in the existing deployment. Applying the full example manifest would reset
+that setting to its example value. FA4 draft KV stays BF16; target KV stays FP8.
+
 ## What changed and why
 
 * DSA indexer host buffers now cover the anchor's **logical_size**. Target

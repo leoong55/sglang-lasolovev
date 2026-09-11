@@ -3,4 +3,4 @@ spec:
     spec:
       containers:
       - name: sglang
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.1-0bcd822377da
