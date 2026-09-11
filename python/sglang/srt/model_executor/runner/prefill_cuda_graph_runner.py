@@ -1202,7 +1202,7 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
         if supports_glm53_bcg(self.model_runner.server_args):
             if (
                 forward_batch.forward_mode != ForwardMode.EXTEND
-                or len(forward_batch.input_ids) != 8192
+                or len(forward_batch.input_ids) not in self.capture_num_tokens
                 or not is_cp_v2_active(forward_batch)
             ):
                 return False

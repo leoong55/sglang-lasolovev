@@ -75,11 +75,9 @@ def filter_prefill_cp_bcg_capture_num_tokens(
     from sglang.srt.layers.cp.glm53_bcg import supports
 
     if supports(server_args):
-        if capture_num_tokens != [8192]:
-            raise ValueError(
-                "GLM53 BCG v5 requires the single global token bucket [8192]"
-            )
-        return capture_num_tokens
+        from sglang.srt.layers.cp.glm53_bcg import validate_capture_sizes
+
+        return validate_capture_sizes(capture_num_tokens)
     min_num_tokens = resolved_view(server_args).attn_cp_size * 2
     filtered = [size for size in capture_num_tokens if size >= min_num_tokens]
     if not filtered:
@@ -188,9 +186,14 @@ class PrefillCPBCGInput:
         from sglang.srt.layers.cp.interleave import InterleaveCPStrategy
 
         if enabled() and isinstance(get_cp_strategy(), InterleaveCPStrategy):
-            if num_tokens != 8192 or 8192 not in capture_num_tokens:
+            from sglang.srt.layers.cp.glm53_bcg import exact_replay_bucket
+
+            bucket = exact_replay_bucket(
+                num_tokens, extend_seq_lens, capture_num_tokens, get_cp_strategy().cp_size
+            )
+            if bucket is None or self.bucket_local_tokens.get(bucket) != bucket // 8:
                 return None
-            capture_num_tokens = [8192]
+            return bucket
         required_local_tokens = self.required_local_tokens(extend_seq_lens)
         if required_local_tokens is None:
             return None

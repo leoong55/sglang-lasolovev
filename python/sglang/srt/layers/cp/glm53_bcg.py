@@ -8,6 +8,21 @@ from __future__ import annotations
 
 import os
 
+CAPTURE_TOKEN_SIZES = (8192, 16384, 32768)
+
+
+def validate_capture_sizes(sizes):
+    """Only exact, explicitly requested global token buckets are captured."""
+    if (
+        not sizes
+        or any(type(size) is not int or size not in CAPTURE_TOKEN_SIZES for size in sizes)
+        or list(sizes) != sorted(set(sizes))
+    ):
+        raise ValueError(
+            "GLM53 BCG requires a sorted, unique subset of [8192, 16384, 32768]"
+        )
+    return list(sizes)
+
 
 def enabled() -> bool:
     return os.environ.get("SGLANG_GLM53_PREFILL_BCG") == "1"
@@ -48,13 +63,20 @@ def supports(server_args) -> bool:
 
 def exact_local_rows(extend_seq_lens, cp_size=8):
     # Interleave partitions the concatenated batch, not each request separately.
-    # No padded reuse in v5: this also keeps MoE/hidden collectives invariant.
+    # No padded reuse: this also keeps MoE/hidden collectives invariant.
     if extend_seq_lens is None or cp_size != 8:
         return None
     if any(int(length) <= 0 for length in extend_seq_lens):
         return None
     total = sum(int(length) for length in extend_seq_lens)
-    return 1024 if total == 8192 else None
+    return total // cp_size if total in CAPTURE_TOKEN_SIZES else None
+
+
+def exact_replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size=8):
+    rows = exact_local_rows(extend_seq_lens, cp_size)
+    if rows is None or rows * cp_size != num_tokens:
+        return None
+    return num_tokens if num_tokens in capture_num_tokens else None
 
 
 def prepare_dcp(runner, batch):
@@ -67,7 +89,7 @@ def prepare_dcp(runner, batch):
     )
 
     model_runner = runner.model_runner
-    # A fresh plan is necessary even when total query rows stay at 8192:
+    # A fresh plan is necessary even when the global query count is unchanged:
     # prefix lengths, request slots and physical KV pages change per replay.
     with runner._prefill_forward_context(batch):
         batch.attn_dcp_metadata = (
