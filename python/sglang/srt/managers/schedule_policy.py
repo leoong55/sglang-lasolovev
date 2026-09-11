@@ -494,7 +494,9 @@ class PrefillAdder:
         dllm_config: Optional[DllmConfig] = None,
         waiting_queue_len: int = 0,
         prefill_tile_block_m: int = 64,
+        full_need_budget=None,
     ):
+        self.full_need_budget = full_need_budget
         self.page_size = page_size
         self.prefill_tile_block_m = prefill_tile_block_m
         self.tree_cache = tree_cache
@@ -825,7 +827,13 @@ class PrefillAdder:
             if self.rem_dllm_tokens <= 0:
                 return AddReqResult.OTHER
         else:
-            if self.rem_chunk_tokens is not None and self.rem_chunk_tokens <= 0:
+            short_budget = (
+                self.full_need_budget.short_tokens if self.full_need_budget else 0
+            )
+            if (
+                self.rem_chunk_tokens is not None
+                and self.rem_chunk_tokens <= -short_budget
+            ):
                 return AddReqResult.OTHER
 
         return AddReqResult.CONTINUE
@@ -971,6 +979,16 @@ class PrefillAdder:
         )
 
     def add_chunked_req(self, req: Req):
+        if self.full_need_budget is not None:
+            cap = self.full_need_budget.chunk_cap(
+                req, self.can_run_list, self.rem_chunk_tokens
+            )
+            if cap <= 0:
+                # Keep the request and its locks in scheduler.chunked_req.
+                # Other PP microbatches can decode and release their KV.
+                return req
+        else:
+            cap = None
         if self.dllm_config is not None:
             _rem_tokens = self._get_dllm_remain_tokens()
         else:
@@ -987,6 +1005,9 @@ class PrefillAdder:
                 if self.is_hybrid_swa:
                     return req
                 _rem_tokens = self.rem_chunk_tokens
+
+        if cap is not None:
+            _rem_tokens = min(_rem_tokens, cap)
 
         # A mid-chunk rank prefills this pass regardless of the delayer
         # verdict, so report prefillable=True and ignore the result.
@@ -1213,6 +1234,19 @@ class PrefillAdder:
             return AddReqResult.NO_TOKEN
 
         chunk_tokens_limit = self.rem_chunk_tokens
+        if (
+            self.full_need_budget is not None
+            and (has_chunked_req or self.new_chunked_req is not None)
+            and chunk_tokens_limit is not None
+            and real_input_tokens > chunk_tokens_limit
+            and not self.full_need_budget.short_fits(
+                real_input_tokens, self.rem_chunk_tokens
+            )
+        ):
+            # A parked chunk still owns the single chunked_req slot. Do not
+            # create a second long prefill and overwrite it. Short full
+            # prefills may use the remaining bounded bypass quota.
+            return AddReqResult.NO_TOKEN
         if self.is_hybrid_swa:
             # host-hit prefix is loaded back, not re-prefilled, so the SWA peak is
             # driven only by the freshly-prefilled tail (the loaded window is
@@ -1247,6 +1281,11 @@ class PrefillAdder:
             return AddReqResult.OTHER
 
         with self._lock_node(req.last_node):
+            if (
+                self.full_need_budget is not None
+                and not self.full_need_budget.can_admit(req, self.can_run_list)
+            ):
+                return AddReqResult.NO_TOKEN
             # self.rem_total_tokens may decrease after the lock acquisition
             if total_tokens >= self.rem_total_tokens:
                 return AddReqResult.NO_TOKEN
@@ -1327,7 +1366,16 @@ class PrefillAdder:
 
                 self._add_dllm_req(req, prefix_len)
                 self._req_inc_lock_ref(req)
-            elif chunk_tokens_limit is None or input_tokens <= chunk_tokens_limit:
+            elif (
+                chunk_tokens_limit is None
+                or input_tokens <= chunk_tokens_limit
+                or (
+                    self.full_need_budget is not None
+                    and self.full_need_budget.short_fits(
+                        input_tokens, self.rem_chunk_tokens
+                    )
+                )
+            ):
                 if (
                     tile_stop := self._check_prefill_tile_budget(input_tokens)
                 ) is not None:

@@ -3605,6 +3605,44 @@ class Scheduler(
         else:
             prefill_tile_block_m = 64  # Fallback for non-Triton backends
 
+        from sglang.srt.managers.pp_full_need import (
+            FitScan,
+            FullNeedBudget,
+        )
+        from sglang.srt.managers.pp_full_need import enabled as pp_full_need_enabled
+
+        full_need_budget = None
+        fit_scan = None
+        if pp_full_need_enabled():
+            if (
+                self.ps.pp_size <= 1
+                or self.tree_cache.supports_mamba()
+                or getattr(self.tree_cache, "disable", True)
+                or hasattr(self.token_to_kv_pool_allocator, "size_swa")
+                or self.dllm_config is not None
+                or self.enable_priority_preemption
+            ):
+                raise ValueError(
+                    "PP full-need requires PP, full attention, radix cache, no preemption"
+                )
+            full_need_budget = FullNeedBudget(
+                inflight=lambda: [
+                    *self.collect_inflight_reqs(),
+                    self.chunked_req,
+                    *running_batch.reqs,
+                ],
+                free_tokens=lambda: (
+                    self.token_to_kv_pool_allocator.available_size()
+                    + self.tree_cache.evictable_size()
+                ),
+                page_size=self.page_size,
+                max_running=self.max_running_requests,
+                short_tokens=int(
+                    os.environ.get("SGLANG_PP_SHORT_BYPASS_TOKENS", "512")
+                ),
+            )
+            fit_scan = FitScan()
+
         adder = PrefillAdder(
             self.page_size,
             self.tree_cache,
@@ -3622,6 +3660,7 @@ class Scheduler(
             dllm_config=self.dllm_config,
             waiting_queue_len=len(self.waiting_queue),
             prefill_tile_block_m=prefill_tile_block_m,
+            full_need_budget=full_need_budget,
         )
 
         if self.chunked_req is not None:
@@ -3711,6 +3750,10 @@ class Scheduler(
             if self.enable_lora:
                 running_loras.add(req.lora_id)
 
+            added = len(adder.can_run_list) > 0 and req is adder.can_run_list[-1]
+            if fit_scan is not None and added:
+                fit_scan.admitted()
+
             if res != AddReqResult.CONTINUE:
                 if res == AddReqResult.NO_TOKEN:
                     if self.enable_hierarchical_cache:
@@ -3735,6 +3778,18 @@ class Scheduler(
                             req.kv.mamba_pool_idx.unsqueeze(-1)
                         )
                         req.kv.mamba_pool_idx = None
+                if (
+                    fit_scan is not None
+                    and not added
+                    and res == AddReqResult.NO_TOKEN
+                    and adder.rem_total_tokens > 0
+                    and adder.cur_rem_tokens > 0
+                    and fit_scan.skip(req)
+                ):
+                    # Candidate-specific rejection: clear the flag AFTER the
+                    # standard rejection cleanup, or the next iteration stops.
+                    running_batch.batch_is_full = False
+                    continue
                 break
 
         if mamba_allocator is not None:
@@ -3742,6 +3797,14 @@ class Scheduler(
 
         # Update waiting queue
         can_run_list: List[Req] = adder.can_run_list
+        if fit_scan is not None and fit_scan.admissions:
+            logger.info(
+                "PP full-need admission: active=%d cap=%d admitted=%d skipped=%d",
+                len(full_need_budget.live(can_run_list)),
+                self.max_running_requests,
+                fit_scan.admissions,
+                len(fit_scan.skipped),
+            )
         if len(can_run_list) == 0:
             return None, running_batch
 
@@ -3756,8 +3819,14 @@ class Scheduler(
             assert self.chunked_req is None
             self.chunked_req = adder.new_chunked_req
 
-        if self.chunked_req is not None:
-            self.chunked_req.inflight_middle_chunks += 1
+        batch_chunked_req = self.chunked_req
+        if full_need_budget is not None and batch_chunked_req not in can_run_set:
+            # A parked chunk owns its scheduler slot, but no work for it was
+            # submitted in this batch. Do not increment its in-flight count or
+            # mark a short-only bypass batch as an intermediate prefill chunk.
+            batch_chunked_req = None
+        if batch_chunked_req is not None:
+            batch_chunked_req.inflight_middle_chunks += 1
 
         set_time_batch(can_run_list, "set_forward_entry_time")
 
@@ -3770,11 +3839,11 @@ class Scheduler(
             self.model_config,
             self.enable_overlap,
             self.spec_algorithm,
-            chunked_req=self.chunked_req,
+            chunked_req=batch_chunked_req,
         )
 
         new_batch.contains_last_prefill_chunk = (
-            self.chunked_req is None or len(can_run_list) != 1
+            batch_chunked_req is None or len(can_run_list) != 1
         )
 
         if self.enable_hierarchical_cache:

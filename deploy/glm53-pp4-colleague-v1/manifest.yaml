@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang-glm53-pp4
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sglang-glm53-pp4
+  template:
+    metadata:
+      labels:
+        app: sglang-glm53-pp4
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: sglang
+          image: ghcr.io/leoong55/sglang-lasolovev:glm53-pp4-colleague-v1
+          imagePullPolicy: Always
+          args: [--model-path, /model]
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: '112'
+              memory: 1536Gi
+              nvidia.com/gpu: '8'
+            limits:
+              cpu: '112'
+              memory: 1536Gi
+              nvidia.com/gpu: '8'
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 10
+          volumeMounts:
+            - name: model
+              mountPath: /model
+              readOnly: true
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: model
+          persistentVolumeClaim:
+            claimName: glm53-w4afp8
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang-glm53-pp4
+spec:
+  selector:
+    app: sglang-glm53-pp4
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

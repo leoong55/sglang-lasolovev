@@ -1,0 +1,45 @@
+{
+  "base_commit": "0bcd822377da7b5718e674eaf9c870d349424dd1",
+  "files": [
+    {
+      "path": "srt/managers/scheduler.py",
+      "base_sha256": "3a12fdfb9c21571d8007ba60aedd7e84b67636583bac8243373c75d6a2ab324e",
+      "patched_sha256": "3d9018b4e2cff23e329374f525a83f1ab0f5ddd172fd5e1eed6f4c93a9900bdd"
+    },
+    {
+      "path": "srt/managers/schedule_policy.py",
+      "base_sha256": "5ceae6ad98493297bf557fdb38b6e53f654319e26238c9e4e22a00aead230e3c",
+      "patched_sha256": "119846fab01dedd00c5f4a0e7da1baa4495d6b753c39035d7b3cc952d6e98559"
+    },
+    {
+      "path": "srt/managers/pp_full_need.py",
+      "base_sha256": null,
+      "patched_sha256": "261fb4d3e13cb6d5345173a3b04ed95a113d3e9f1f5dd1bcde1bd5df65ee0a44"
+    },
+    {
+      "path": "srt/models/deepseek_v2.py",
+      "base_sha256": "8fa0cfb8e8d61b7e41680fb19a3d83bd00e0a1c2d7403b42e0a0db259b308c0b",
+      "patched_sha256": "8fa0cfb8e8d61b7e41680fb19a3d83bd00e0a1c2d7403b42e0a0db259b308c0b"
+    },
+    {
+      "path": "srt/managers/schedule_batch.py",
+      "base_sha256": "170f847aba6701d8d876a98c5edb8a66f188f5bc12fc30973596d132fcbb8c72",
+      "patched_sha256": "170f847aba6701d8d876a98c5edb8a66f188f5bc12fc30973596d132fcbb8c72"
+    },
+    {
+      "path": "srt/managers/scheduler_pp_mixin.py",
+      "base_sha256": "32ae89f013d88347152f8c8ab61e28839ebb0fe7960593d9c0a76bf238b163f1",
+      "patched_sha256": "32ae89f013d88347152f8c8ab61e28839ebb0fe7960593d9c0a76bf238b163f1"
+    },
+    {
+      "path": "srt/server_args.py",
+      "base_sha256": "204fe57ba81acc25b7badcabf3b4b741021767c91f1d64e0df949cb175464b7c",
+      "patched_sha256": "204fe57ba81acc25b7badcabf3b4b741021767c91f1d64e0df949cb175464b7c"
+    },
+    {
+      "path": "srt/layers/quantization/w4afp8.py",
+      "base_sha256": "21e9c527c9b83e350cdc35ce2bc62891cda1550934b2a5d302f0f807f752f125",
+      "patched_sha256": "21e9c527c9b83e350cdc35ce2bc62891cda1550934b2a5d302f0f807f752f125"
+    }
+  ]
+}
