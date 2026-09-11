@@ -417,14 +417,13 @@ class DeepseekSparseAttnBackend(
         self.glm53_dflash_dcp = self.dcp_enabled and supports_dflash_dcp(model_runner.server_args)
         if self.dcp_enabled:
             from sglang.srt.arg_groups.overrides import resolving_view
-            from sglang.srt.layers.cp.glm53_hicache import supports_hicache_dflash
+            from sglang.srt.layers.cp.glm53_hicache import supports_hicache_cp_dcp
 
             if model_runner.server_args.enable_hierarchical_cache and not (
-                self.glm53_dflash_dcp
-                and supports_hicache_dflash(resolving_view(model_runner.server_args))
+                supports_hicache_cp_dcp(model_runner.server_args)
             ):
                 raise ValueError(
-                    "DSA DCP HiCache requires the GLM53 DFlash L1/L2 profile: "
+                    "DSA DCP HiCache requires the GLM53 L1/L2 profile (DFLASH or no speculation): "
                     "unified radix, layer_first/direct and write_through."
                 )
             if (

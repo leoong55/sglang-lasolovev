@@ -1,0 +1,60 @@
+{
+  "id": "hicache-v9.4",
+  "date": "2026-09-11",
+  "source": "Operator benchmark pasted in this conversation; exact current message is authoritative.",
+  "metrics": {
+    "Successful requests": 300,
+    "Failed requests": 0,
+    "Maximum request concurrency": 40,
+    "Benchmark duration (s)": 545.78,
+    "Total input tokens": 22503605,
+    "Total generated tokens": 300000,
+    "Request throughput (req/s)": 0.55,
+    "Output token throughput (tok/s)": 549.67,
+    "Peak output token throughput (tok/s)": 453.0,
+    "Peak concurrent requests": 44.0,
+    "Total token throughput (tok/s)": 41781.49,
+    "Mean TTFT (ms)": 23400.73,
+    "Median TTFT (ms)": 17704.48,
+    "P50 TTFT (ms)": 17704.48,
+    "P95 TTFT (ms)": 71055.64,
+    "P99 TTFT (ms)": 105261.42,
+    "Mean TPOT (ms)": 47.78,
+    "Median TPOT (ms)": 46.43,
+    "P50 TPOT (ms)": 46.43,
+    "P95 TPOT (ms)": 72.92,
+    "P99 TPOT (ms)": 88.15,
+    "Mean ITL (ms)": 170.8,
+    "Median ITL (ms)": 82.5,
+    "P50 ITL (ms)": 82.5,
+    "P95 ITL (ms)": 806.06,
+    "P99 ITL (ms)": 1000.27,
+    "Mean E2EL (ms)": 71133.59,
+    "Median E2EL (ms)": 63946.1,
+    "P50 E2EL (ms)": 63946.1,
+    "P95 E2EL (ms)": 127069.11,
+    "P99 E2EL (ms)": 162807.94
+  },
+  "validation": {
+    "startup_and_300_requests": "operator-reported success",
+    "cuda_numeric_parity": "not established by this benchmark",
+    "forced_hicache_evict_restore": "not established by this benchmark"
+  },
+  "last_prepared_profile": {
+    "source_commit": "1a03ba2a2501d6086aa3b864a28008883963fefa",
+    "manifest": "v9.4-prepared-manifest.yaml",
+    "image": "i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.4-0bcd822377da",
+    "target": "PhalaCloud/GLM-5.3-W4AFP8",
+    "draft": "incoai/GLM-5.3-DFlash2",
+    "chunked_prefill_size": 16384,
+    "max_running_requests": 32,
+    "mem_fraction_static": 0.75,
+    "moe_a2a_backend": "none",
+    "hicache_write_policy": "write_through"
+  },
+  "missing_provenance": [
+    "actual pod effective argv and image digest for this run",
+    "exact current benchmark command and vLLM version",
+    "detailed result JSON, cache state and acceptance counters"
+  ]
+}

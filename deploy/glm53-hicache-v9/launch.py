@@ -29,69 +29,95 @@ def check_profile(argv):
     p = argparse.ArgumentParser(allow_abbrev=False)
     p.add_argument("--chunked-prefill-size", required=True, type=int, choices=SUPPORTED_CHUNKS)
     p.add_argument("--max-running-requests", required=True, type=int)
-    p.add_argument("--cuda-graph-backend-decode", required=True)
-    p.add_argument("--cuda-graph-max-bs-decode", required=True, type=int)
+    p.add_argument("--cuda-graph-backend-decode", required=True, choices=["full", "disabled"])
+    p.add_argument("--cuda-graph-max-bs-decode", type=int)
+    p.add_argument("--cuda-graph-bs-decode", nargs="+", type=int)
     p.add_argument("--disable-shared-experts-fusion", action="store_true", required=True)
     p.add_argument("--dsa-prefill-backend", required=True)
     p.add_argument("--moe-a2a-backend", required=True)
-    p.add_argument("--cuda-graph-backend-prefill", required=True)
-    p.add_argument("--cuda-graph-bs-prefill", required=True, nargs="+", type=int)
-    p.add_argument("--cuda-graph-max-bs-prefill", required=True, type=int)
+    p.add_argument("--cuda-graph-backend-prefill", required=True, choices=["breakable", "disabled"])
+    p.add_argument("--cuda-graph-bs-prefill", nargs="+", type=int)
+    p.add_argument("--cuda-graph-max-bs-prefill", type=int)
+    p.add_argument("--speculative-algorithm", choices=["DFLASH"])
+    p.add_argument("--speculative-draft-model-path")
+    p.add_argument("--speculative-draft-model-quantization", choices=["unquant"])
+    p.add_argument("--speculative-draft-attention-backend", choices=["fa4"])
+    p.add_argument("--enable-hierarchical-cache", action="store_true")
+    p.add_argument("--hicache-write-policy", choices=["write_through"])
+    p.add_argument("--hicache-mem-layout", choices=["layer_first"])
+    p.add_argument("--hicache-io-backend", choices=["direct"])
+    p.add_argument("--hicache-host-memory-mode", choices=["cache"])
     args, _ = p.parse_known_args(argv)
     buckets = args.cuda_graph_bs_prefill
-    if (
-        buckets != sorted(set(buckets))
+    if args.cuda_graph_backend_prefill == "breakable" and (
+        not buckets
+        or buckets != sorted(set(buckets))
         or any(size not in SUPPORTED_CHUNKS for size in buckets)
         or max(buckets) != args.chunked_prefill_size
         or args.cuda_graph_max_bs_prefill != args.chunked_prefill_size
     ):
         p.error("Prefill buckets must be a sorted unique subset of 8192/16384/32768; their maximum and --cuda-graph-max-bs-prefill must equal --chunked-prefill-size")
     if (
-        args.max_running_requests != 32
-        or args.cuda_graph_backend_decode != "full"
-        or args.cuda_graph_max_bs_decode != 32
+        args.max_running_requests <= 0
         or args.dsa_prefill_backend != "flashmla_sparse_q8"
         or args.moe_a2a_backend != "none"
-        or args.cuda_graph_backend_prefill != "breakable"
     ):
-        p.error("Requires max-running32, full decode graphs/max32, Q8 prefill, A2A none and breakable prefill graphs")
+        p.error("Requires positive max-running-requests, Q8 prefill and A2A none")
+    if args.cuda_graph_backend_decode == "full":
+        if args.cuda_graph_max_bs_decode is None or args.cuda_graph_max_bs_decode <= 0:
+            p.error("Full decode graphs require a positive --cuda-graph-max-bs-decode")
+        decode_buckets = args.cuda_graph_bs_decode
+        if decode_buckets is not None and (
+            decode_buckets != sorted(set(decode_buckets))
+            or any(n <= 0 for n in decode_buckets)
+            or decode_buckets[-1] != args.cuda_graph_max_bs_decode
+        ):
+            p.error("Decode buckets must be sorted, unique, positive and end at --cuda-graph-max-bs-decode")
     forbidden = {
         "--enable-two-batch-overlap", "--enable-single-batch-overlap", "--enable-eplb",
         "--disable-cuda-graph", "--disable-piecewise-cuda-graph",
+        "--disable-prefill-cuda-graph", "--disable-decode-cuda-graph", "--cuda-graph-config",
     }
     if any(x.split("=", 1)[0] in forbidden for x in argv):
-        p.error("Remove overlap/EPLB/legacy graph override flags for this experiment")
+        p.error("Remove overlap/EPLB flags; select graphs explicitly with --cuda-graph-backend-prefill/decode, including disabled")
     if os.environ.get("SGLANG_ENABLE_CP_V2") != "1":
         p.error("SGLANG_ENABLE_CP_V2=1 is required")
-    p_spec = argparse.ArgumentParser(allow_abbrev=False)
-    p_spec.add_argument("--speculative-algorithm", required=True, choices=["DFLASH"])
-    p_spec.add_argument("--speculative-draft-model-path", required=True)
-    p_spec.add_argument("--speculative-draft-model-quantization", required=True, choices=["unquant"])
-    p_spec.add_argument("--speculative-draft-attention-backend", required=True, choices=["fa4"])
-    spec, _ = p_spec.parse_known_args(argv)
-    if "GLM-5.3-Flash" in spec.speculative_draft_model_path:
-        p_spec.error("Use the full GLM-5.3 draft, not GLM-5.3-Flash")
-    p_cache = argparse.ArgumentParser(allow_abbrev=False)
-    p_cache.add_argument("--enable-hierarchical-cache", action="store_true", required=True)
-    p_cache.add_argument("--hicache-write-policy", required=True, choices=["write_through"])
-    p_cache.add_argument("--hicache-mem-layout", required=True, choices=["layer_first"])
-    p_cache.add_argument("--hicache-io-backend", required=True, choices=["direct"])
-    p_cache.add_argument("--hicache-host-memory-mode", required=True, choices=["cache"])
-    p_cache.parse_known_args(argv)
+    if args.speculative_algorithm == "DFLASH":
+        if not all((args.speculative_draft_model_path, args.speculative_draft_model_quantization,
+                    args.speculative_draft_attention_backend)):
+            p.error("DFLASH requires explicit draft model path, unquant quantization and fa4 attention")
+        if "GLM-5.3-Flash" in args.speculative_draft_model_path:
+            p.error("Use the full GLM-5.3 draft, not GLM-5.3-Flash")
+    elif any(x.startswith("--speculative-") for x in argv):
+        p.error("To disable speculation, remove all --speculative-* options and their values")
+    if args.enable_hierarchical_cache and not all((
+        args.hicache_write_policy, args.hicache_mem_layout,
+        args.hicache_io_backend, args.hicache_host_memory_mode,
+    )):
+        p.error("HiCache requires explicit write_through, layer_first, direct and cache settings")
     return args
+
+
+def configure_runtime_env(profile):
+    """Opt-in guards follow selected features; never enable a removed feature."""
+    os.environ.pop("SGLANG_GLM53_DEEPEP_PREFILL", None)
+    os.environ.pop("SGLANG_GLM53_DEEPEP_OPT", None)
+    os.environ["SGLANG_GLM53_PREFILL_BCG"] = "1" if profile.cuda_graph_backend_prefill == "breakable" else "0"
+    os.environ["SGLANG_GLM53_DFLASH_DCP"] = "1" if profile.speculative_algorithm == "DFLASH" else "0"
+    os.environ["SGLANG_GLM53_HICACHE_DCP"] = "1" if profile.enable_hierarchical_cache else "0"
+    os.environ["SGLANG_ENABLE_UNIFIED_RADIX_TREE"] = "1"
 
 
 if __name__ == "__main__":
     argv = configure(sys.argv[1:])
     install(package_root(), Path(__file__).resolve().parent, verify_only=True)
     profile = check_profile(argv)
-    os.environ.pop("SGLANG_GLM53_DEEPEP_PREFILL", None)
-    os.environ.pop("SGLANG_GLM53_DEEPEP_OPT", None)
-    os.environ["SGLANG_GLM53_PREFILL_BCG"] = "1"
-    os.environ["SGLANG_GLM53_DFLASH_DCP"] = "1"
-    os.environ["SGLANG_GLM53_HICACHE_DCP"] = "1"
-    os.environ["SGLANG_ENABLE_UNIFIED_RADIX_TREE"] = "1"
-    print("glm53-hicache-v9: global buckets=" + str(profile.cuda_graph_bs_prefill)
-          + "; local rows=" + str([n // 8 for n in profile.cuda_graph_bs_prefill]), flush=True)
+    configure_runtime_env(profile)
+    print(f"glm53: speculation={profile.speculative_algorithm or 'off'}; "
+          f"hicache={profile.enable_hierarchical_cache}; max-running={profile.max_running_requests}; "
+          f"prefill-graphs={profile.cuda_graph_backend_prefill}; "
+          f"decode-graphs={profile.cuda_graph_backend_decode}; "
+          f"decode-max-bs={profile.cuda_graph_max_bs_decode}; "
+          f"prefill-buckets={profile.cuda_graph_bs_prefill}", flush=True)
     print("glm53-hicache-v9: effective argv=" + json.dumps(argv), flush=True)
     os.execv(sys.executable, [sys.executable, "-m", "sglang.launch_server", *argv])

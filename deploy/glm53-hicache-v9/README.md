@@ -5,6 +5,64 @@ Third stage, based on the DFlash PR. Full target model
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and
 FA4 draft KV in its upstream compute dtype. Initial chunk: 16384.
 
+## v9.5: independent launch controls and recorded v9.4 result
+
+The operator reports a successful v9.4 run: 300 completed requests, no errors,
+549.67 output tok/s over 545.78 seconds. The full metrics and comparison with
+seven previous measurements are in [benchmarks/COMPARISON.md](benchmarks/COMPARISON.md).
+The best previous aggregate rate was 474.86 tok/s; v9.4 is 15.75% higher,
+but median TTFT rose from 10.56 to 17.70 seconds. This measures the combined
+configuration, not DFlash's isolated contribution. The actual pod arguments,
+image digest and detailed client JSON were not attached to this result.
+
+The old experiment launcher required DFLASH, HiCache and exactly 32 running
+requests. The DSA runtime guard also incorrectly coupled HiCache to DFLASH.
+These restrictions now follow the selected features:
+
+| Control | How to select it | Behavior |
+|---|---|---|
+| Speculation off | Remove all `--speculative-*` options **and their values** | No draft worker; target/indexer HiCache can remain enabled |
+| Speculation on | Keep the four DFLASH options from `manifest.yaml` | Full GLM-5.3 DFlash2, FA4, unquantized draft |
+| Request limit | Any positive `--max-running-requests` | No launcher ceiling of 32; available KV still limits actual admission |
+| Decode capture | `--cuda-graph-max-bs-decode` and optional `--cuda-graph-bs-decode` | Independent of request limit; larger batches can run outside the captured range |
+| Decode graphs off | `--cuda-graph-backend-decode disabled` | Capture sizes may be removed |
+| Prefill graphs off | `--cuda-graph-backend-prefill disabled` | Capture sizes may be removed; chunk size remains explicit |
+| HiCache off | Remove `--enable-hierarchical-cache` | L2 is disabled; ordinary unified L1 radix caching remains |
+| Prefill chunk | 8192, 16384 or 32768 | With breakable capture, the largest bucket and max prefill BS must equal the chunk |
+
+These are **startup settings**, requiring a new image and pod restart; they
+are not live HTTP controls. Feature environment variables are derived from
+the CLI, so stale `SGLANG_GLM53_DFLASH_DCP=1` cannot turn a removed draft back on.
+The launcher prints the selected settings and complete effective argv.
+
+Full alternative manifests preserve the PVCs, Service, 16k chunk, 0.75 memory
+fraction and HiCache settings. Apply one to the existing Deployment at a time:
+
+| Manifest | DFlash | Request limit | Maximum decode capture BS |
+|---|---|---:|---:|
+| [manifest.yaml](manifest.yaml) | on | 32 | 32 |
+| [manifest-nospec-32.yaml](manifest-nospec-32.yaml) | off | 32 | 32 |
+| [manifest-nospec-64.yaml](manifest-nospec-64.yaml) | off | 64 | 64 |
+| [manifest-dflash-64.yaml](manifest-dflash-64.yaml) | on | 64 | 64 |
+
+The 64 variants include decode buckets `1 2 4 8 16 32 48 64`. Compare on/off
+at 32 first, then change the request limit; retain client concurrency 40 to
+compare the existing workload. Testing actual concurrency 64 requires a
+separate client run with that concurrency. Larger capture sets consume GPU
+memory; this patch removes a hard limit, not the physical capacity constraint.
+
+The existing target FP8, DSA/CP8/DCP4, `write_through`, `layer_first`, `direct`
+and full-model checks remain. Other speculative algorithms and the experimental
+DeepEP patches are outside this profile. HiCache without speculation uses the
+target/indexer pools and does not create a draft sidecar.
+
+CPU regressions cover all four DFlash/HiCache combinations, graph opt-outs,
+stale environment variables, larger request/graph capacities and retained
+unsupported-profile rejection. The compiler gate now covers 34 specializations,
+including CP request dimensions 64 and 96. v9.5 has not been run on H200 here.
+
+Build tag: `glm53-hicache-v9.5-0bcd822377da`.
+
 ## v9.4: compiler gate and short-prefill LSE correctness
 
 The next H200 log reaches actual 16k breakable prefill capture, then Triton
@@ -169,8 +227,10 @@ fence, split-node acknowledgement and an empty-rank collective.
 The shared workflow also checks the actual causal Triton index kernel
 with the CPU interpreter. NumPy 1.26 is pinned for Triton 3.1's interpreter.
 
-No full-model H200, CUDA DMA/graphs or performance validation is claimed.
-On the built 8xH200 deployment, require these checks in order:
+The v9.4 operator benchmark above establishes startup and completion of that
+workload on the operator's deployment. It does not establish numerical parity
+or forced GPU/RAM eviction and recovery. v9.5 controls still need an H200 run.
+For the remaining hardware validation:
 
 1. Re-run the DFlash profile with HiCache off; record greedy token IDs,
    request errors, acceptance, KV capacity and TPOT/ITL/throughput.

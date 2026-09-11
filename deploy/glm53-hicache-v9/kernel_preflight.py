@@ -45,7 +45,7 @@ def cases(package_root):
     dcp = load_source(package_root, "kernels/ops/attention/dcp_kernels.py")
     transform = load_source(package_root, "kernels/ops/attention/dsa/transform_index.py")
     for dtype in ("i32", "i64"):
-        for requests in (1, 32):
+        for requests in (1, 32, 64, 96):
             for rank in (0, 7):
                 yield (
                     split.dsa_cp_round_robin_split_q_seqs_kernel,

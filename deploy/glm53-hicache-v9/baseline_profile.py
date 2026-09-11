@@ -59,7 +59,7 @@ def validate(argv):
                 f"Expected full GLM-5.3 model at {config_path}: {key} must be {value}, got {config.get(key)!r}"
             )
     print(
-        f"glm53-cp8-dcp4-q8-v3: full GLM-5.3; TP8 EP8 CP8 DCP4 DP1; FP8 KV; prefill={args.dsa_prefill_backend}; decode=flashmla_kv; DFlash2; L1/L2 HiCache",
+        f"glm53: full GLM-5.3; TP8 EP8 CP8 DCP4 DP1; FP8 KV; prefill={args.dsa_prefill_backend}; decode=flashmla_kv",
         flush=True,
     )
 
