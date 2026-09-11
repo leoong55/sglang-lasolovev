@@ -597,6 +597,12 @@ class Scheduler(
                 cache_controller.load_fence_stream = (
                     self.tp_worker.model_runner.forward_stream
                 )
+                if self.spec_algorithm.is_dflash_family():
+                    # DFlash publishes lengths before materializing draft KV.
+                    # Write-through must also wait for that producer's tail.
+                    cache_controller.write_fence_stream = (
+                        self.tp_worker.model_runner.forward_stream
+                    )
         self.emit_metrics_constants()
         self.maybe_init_hccl_dp_prewarm()
 

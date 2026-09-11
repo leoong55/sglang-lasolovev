@@ -364,6 +364,9 @@ class HiCacheController:
         # Set by the scheduler to the forward stream; gates load-back H2D
         # behind in-flight forwards (see start_loading).
         self.load_fence_stream = None
+        # Optional producer fence for speculative draft materialization, which
+        # can be enqueued after the scheduler's early sequence-length publish.
+        self.write_fence_stream = None
         self.ack_write_queue: List[HiCacheAck] = []
 
         self.l2_transfer_engine = L2TransferEngine(io_backend)
@@ -810,6 +813,10 @@ class HiCacheController:
         host_indices, device_indices, pool_transfers = self._move_write_operation(op)
         self.write_queue.clear()
 
+        if self.write_fence_stream is not None:
+            self.l2_transfer_engine.device_to_host_stream.wait_stream(
+                self.write_fence_stream
+            )
         completion = self.l2_transfer_engine.submit_device_to_host(
             self._l2_transfers(host_indices, device_indices, pool_transfers)
         )

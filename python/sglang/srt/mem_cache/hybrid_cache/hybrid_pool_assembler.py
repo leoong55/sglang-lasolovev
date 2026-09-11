@@ -1038,14 +1038,27 @@ def build_full_draft_pools(
 
     # Note(kpham-sgl): DCP x DSpark draft KV is replicated and spans the virtual
     # loc space, so match the target host's logical_size instead of physical size.
-    draft_host_pool = _build_mha_mla_host_pool(
-        pool=pool,
-        host_to_device_ratio=host_pool_group.logical_size / pool.size,
-        page_size=controller.page_size,
-        layout=get_memory().hicache_mem_layout,
-        allocator_type=_get_allocator_type(),
-        pool_label="draft",
-    )
+    if getattr(pool, "is_glm53_bounded", False):
+        from sglang.srt.mem_cache.glm53_bounded_draft import bounded_draft_host_pool_class
+        pool.register_layer_transfer_counter(controller.layer_done_counter)
+        draft_host_pool = bounded_draft_host_pool_class()(
+            device_pool=pool,
+            host_to_device_ratio=host_pool_group.logical_size / pool.size,
+            host_size=0,
+            page_size=controller.page_size,
+            layout=get_memory().hicache_mem_layout,
+            allocator_type=_get_allocator_type(),
+            pool_label="draft",
+        )
+    else:
+        draft_host_pool = _build_mha_mla_host_pool(
+            pool=pool,
+            host_to_device_ratio=host_pool_group.logical_size / pool.size,
+            page_size=controller.page_size,
+            layout=get_memory().hicache_mem_layout,
+            allocator_type=_get_allocator_type(),
+            pool_label="draft",
+        )
     draft_layer_mapping = {i: i for i in range(pool.layer_num)}
 
     specs = [

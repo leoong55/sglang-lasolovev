@@ -46,3 +46,14 @@ jobs:
           TRITON_INTERPRET: '1'
           SGLANG_SOURCE_ROOT: ${{ github.workspace }}
         run: python deploy/glm53-dflash-v8/tests/test_kernel_verify.py -v
+      - name: Compile CP/DCP bridge kernels to H200 cubins without GPU
+        if: hashFiles('deploy/glm53-hicache-v9/kernel_preflight.py') != ''
+        run: python deploy/glm53-hicache-v9/kernel_preflight.py --package-root python/sglang
+      - name: Check actual CP split kernel and both callers
+        if: hashFiles('deploy/glm53-hicache-v9/tests/test_kernel_cp_split.py') != ''
+        env:
+          TRITON_INTERPRET: '1'
+          SGLANG_SOURCE_ROOT: ${{ github.workspace }}
+        run: |
+          python deploy/glm53-hicache-v9/tests/test_kernel_cp_split.py -v
+          python deploy/glm53-hicache-v9/tests/test_kernel_lse.py -v

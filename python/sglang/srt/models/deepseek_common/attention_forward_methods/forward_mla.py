@@ -121,17 +121,9 @@ def is_mla_dcp_lse_base_on_e(attention_backend: Optional[str]) -> bool:
 def is_dsa_dcp_lse_base_on_e(forward_batch: ForwardBatch) -> bool:
     """Whether the active DSA implementation returns natural-log LSE."""
     dsa_backend = get_attn_backend()
-    forward_mode = forward_batch.forward_mode
-    use_decode_impl = (
-        forward_mode.is_decode_or_idle()
-        or forward_mode.is_target_verify()
-        or forward_mode.is_draft_extend_v2()
-    )
-    dsa_impl = (
-        dsa_backend.dsa_decode_impl
-        if use_decode_impl
-        else dsa_backend.dsa_prefill_impl
-    )
+    # A sub-CP-size prefill falls back from configured Q8 to FlashMLA KV.
+    # Match metadata/kernel dispatch or the reducer uses exp2 on natural LSE.
+    dsa_impl = dsa_backend._dsa_impl_for_batch(forward_batch)
     return dsa_impl == "flashmla_kv"
 
 

@@ -237,6 +237,10 @@ class _SelectorDraftSampler:
     def stage_sampling_params(self, *, bs: int, sampling_info) -> None:
         """Host-side refresh of the static sampling params; must run before the draft
         graph replay that consumes them."""
+        # Batches above the capture capacity use the eager selector. Never resize
+        # a view into these buffers: CUDA graphs retain their original addresses.
+        if bs > self.temperatures.numel():
+            return
         if sampling_info is None:
             self.temperatures[:bs].fill_(1.0)
             self.greedy_mask[:bs].fill_(True)
@@ -297,6 +301,18 @@ class DFlashWorkerV2(BaseSpecWorker):
         self.page_size = get_schedule().page_size
         # Normalized in arg_groups.speculative_hook.handle_speculative_decoding.
         self.draft_window_size: Optional[int] = get_spec().speculative_draft_window_size
+        from sglang.srt.layers.cp.glm53_draft_layout import bounded_draft_enabled
+        self.use_bounded_draft_cache = bounded_draft_enabled()
+        if self.use_bounded_draft_cache:
+            from sglang.srt.layers.cp.glm53_dflash import supports_dflash_dcp
+            from sglang.srt.runtime_context import get_disagg, get_memory
+            if not supports_dflash_dcp(server_args):
+                raise ValueError("Bounded draft is restricted to the GLM53 CP8/DCP4 profile")
+            if (get_memory().enable_unified_memory
+                    or get_disagg().disaggregation_mode in ("prefill", "decode")
+                    or get_disagg().enable_pdmux):
+                raise ValueError("Bounded draft requires colocated execution with the ordinary memory pool")
+            self.draft_window_size = 2048
         self.use_compact_draft_cache = self.draft_window_size is not None
         self.device = target_worker.device
 
@@ -398,7 +414,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         self._draft_greedy_rank_index_buf: Optional[torch.Tensor] = None
         self._draft_greedy_selected_ids_buf: Optional[torch.Tensor] = None
         self._draft_greedy_index_cap: int = 0
-        self._use_fused_kv_materialize = is_cuda() or is_hip()
+        self._use_fused_kv_materialize = (is_cuda() or is_hip()) and not self.use_bounded_draft_cache
         self._fused_kv_helper: Optional[object] = None
         if self._use_fused_kv_materialize:
             self._init_fused_kv_helper()
@@ -697,7 +713,8 @@ class DFlashWorkerV2(BaseSpecWorker):
         # sliding-window path, the draft req->token view is rebuilt from committed
         # target state before each draft forward, so there is nothing persistent
         # to flush here.
-        pass
+        if self.use_bounded_draft_cache:
+            self.draft_model_runner.token_to_kv_pool.clear_bounded_cache()
 
     def _gather_req_to_token_masked(
         self,
@@ -1305,6 +1322,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         positions: torch.Tensor,
         cache_loc_2d: Optional[torch.Tensor] = None,
         commit_lens: Optional[torch.Tensor] = None,
+        context_request_ids: Optional[torch.Tensor] = None,
     ) -> None:
         """Materialize target context features into the draft KV cache at explicit slots.
 
@@ -1382,6 +1400,29 @@ class DFlashWorkerV2(BaseSpecWorker):
 
         with torch.inference_mode():
             ctx_hidden = self.draft_model.project_target_hidden(target_hidden)
+
+            if self.use_bounded_draft_cache:
+                if context_request_ids is None:
+                    raise ValueError("Bounded draft append requires context request ownership")
+                # Keep the legacy projection/norm/RoPE sequence exactly. Filter
+                # rejected rows only after all per-layer context preparation.
+                layers = []
+                for layer in self.draft_model.layers:
+                    attn = layer.self_attn
+                    prepared = self.draft_model.prepare_context_hidden_for_kv(layer, ctx_hidden)
+                    k, v = attn.kv_proj_only(prepared)
+                    k = attn.apply_k_rope(positions, attn.apply_k_norm(k))
+                    layers.append(torch.stack((k.view(-1, 1, 128), v.view(-1, 1, 128)), dim=1))
+                payload = torch.stack(layers, dim=1)
+                valid = torch.ones(num_tokens, dtype=torch.bool, device=device)
+                if cache_loc_2d is not None:
+                    offsets = torch.arange(cache_loc_2d.shape[1], device=device)
+                    valid = (offsets[None, :] < commit_lens[:, None]).reshape(-1)
+                self.draft_model_runner.token_to_kv_pool.commit_context(
+                    virtual=cache_loc[valid], requests=context_request_ids[valid],
+                    positions=positions[valid], payload=payload[valid],
+                )
+                return
 
             if cache_loc_2d is not None:
                 bs = int(commit_lens.shape[0])
@@ -1808,6 +1849,10 @@ class DFlashWorkerV2(BaseSpecWorker):
                 target_hidden=logits_output.hidden_states,
                 cache_loc=batch.out_cache_loc,
                 positions=positions,
+                context_request_ids=(
+                    torch.repeat_interleave(batch.req_pool_indices, ctx_lens.to(torch.int64))
+                    if self.use_bounded_draft_cache else None
+                ),
             )
 
             # Avoid copying large hidden-state buffers to CPU in overlap scheduling.
@@ -1950,7 +1995,17 @@ class DFlashWorkerV2(BaseSpecWorker):
         verify_out_cache_loc = verify_out_cache_loc_2d.reshape(-1)
 
         seq_lens_cpu = self._draft_seq_lens_cpu_buf[:bs]
-        if self.use_compact_draft_cache:
+        draft_out_cache_loc = verify_out_cache_loc
+        if self.use_bounded_draft_cache:
+            draft_seq_lens, draft_out_cache_loc = self.draft_model_runner.token_to_kv_pool.prepare_window(
+                target_table=self.model_runner.req_to_token_pool.req_to_token,
+                draft_table=self.draft_model_runner.req_to_token_pool.req_to_token,
+                request_ids=batch.req_pool_indices, prefix_lens=prefix_lens,
+                block_size=block_size,
+            )
+            seq_lens_cpu.copy_(draft_seq_lens.to("cpu"))
+            draft_seq_lens_sum = int(seq_lens_cpu.sum())
+        elif self.use_compact_draft_cache:
             # Rebuild the draft-local sliding-window view from committed target state.
             draft_prefix_lens = self._compute_compact_draft_seq_lens(prefix_lens)
             self._fill_compact_seq_lens_cpu_bound(
@@ -1993,7 +2048,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             input_ids=block_ids.flatten(),
             req_pool_indices=batch.req_pool_indices,
             seq_lens=draft_seq_lens,
-            out_cache_loc=verify_out_cache_loc,
+            out_cache_loc=draft_out_cache_loc,
             seq_lens_sum=draft_seq_lens_sum,
             seq_lens_cpu=seq_lens_cpu,
             positions=positions,
@@ -2202,6 +2257,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             cache_loc_2d=verify_out_cache_loc_2d,
             positions=positions,
             commit_lens=commit_lens,
+            context_request_ids=(batch.req_pool_indices[:, None].expand(bs, block_size).reshape(-1)
+                                 if self.use_bounded_draft_cache else None),
         )
 
         # Avoid copying large hidden-state buffers to CPU in overlap scheduling.

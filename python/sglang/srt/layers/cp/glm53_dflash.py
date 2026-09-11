@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 
 
-def supports_dflash_dcp(server_args):
+def supports_cp_dcp(server_args):
     from sglang.srt.arg_groups.overrides import (
         attention_backends_of, model_config_of, resolved_view, resolving_view,
     )
@@ -12,18 +12,29 @@ def supports_dflash_dcp(server_args):
     resolved = resolved_view(server_args)
     model = model_config_of(server_args).hf_config
     return (
-        os.environ.get("SGLANG_GLM53_DFLASH_DCP") == "1"
-        and cfg.speculative_algorithm == "DFLASH"
-        and cfg.tp_size == 8 and cfg.ep_size == 8 and cfg.dp_size == 1 and cfg.pp_size == 1
+        cfg.tp_size == 8 and cfg.ep_size == 8 and cfg.dp_size == 1 and cfg.pp_size == 1
         and cfg.enable_prefill_cp and cfg.cp_strategy == "interleave"
         and cfg.enable_cp_decode_attn_tp and cfg.dcp_size == 4
         and cfg.dcp_comm_backend == "ag_rs"
         and cfg.kv_cache_dtype == "fp8_e4m3" and cfg.page_size == 64
         and cfg.quantization == "w4afp8"
         and resolved.attn_cp_size == 8 and resolved.moe_a2a_backend == "none"
-        and attention_backends_of(resolved) == ("flashmla_sparse_q8", "flashmla_kv")
+        # Generic dispatch selects DSA; its kernels have separate selectors.
+        and attention_backends_of(resolved) == ("dsa", "dsa")
+        and resolved.dsa_prefill_backend == "flashmla_sparse_q8"
+        and resolved.dsa_decode_backend == "flashmla_kv"
         and getattr(model, "num_hidden_layers", None) == 78
         and "GlmMoeDsaForCausalLM" in getattr(model, "architectures", [])
+    )
+
+
+def supports_dflash_dcp(server_args):
+    from sglang.srt.arg_groups.overrides import resolving_view
+
+    return (
+        os.environ.get("SGLANG_GLM53_DFLASH_DCP") == "1"
+        and resolving_view(server_args).speculative_algorithm == "DFLASH"
+        and supports_cp_dcp(server_args)
     )
 
 

@@ -81,11 +81,14 @@ def resolve_hicache_dcp_compatibility(server_args: Any):
             "backup and the storage keys must become dcp_rank-aware "
             "first. Run HiCache+DCP with L1/L2 only."
         )
-    if cfg.speculative_algorithm not in (None, "DSPARK"):
+    from sglang.srt.layers.cp.glm53_hicache import supports_hicache_dflash
+
+    if cfg.speculative_algorithm not in (None, "DSPARK") and not supports_hicache_dflash(cfg):
         raise NotImplementedError(
             "HiCache with --dcp-size > 1 only supports DSPARK speculative "
             "decoding; other draft-model host pools have no DCP index "
-            "translation."
+            "translation. The opt-in GLM53 DFlash profile additionally requires "
+            "unified radix, L1/L2 cache mode, layer_first/direct and write_through."
         )
     if cfg.enable_lmcache:
         raise NotImplementedError(
