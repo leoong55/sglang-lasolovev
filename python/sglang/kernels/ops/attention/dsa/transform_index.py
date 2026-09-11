@@ -76,6 +76,7 @@ def transform_index_page_table_prefill_kernel(
     topk_indices_ptr: torch.Tensor,
     cu_seqlens_q_ptr: torch.Tensor,
     result_ptr: torch.Tensor,
+    causal_seq_lens_ptr: torch.Tensor,
     page_table_stride_0: tl.constexpr,
     page_table_stride_1: tl.constexpr,
     topk_indices_stride_0: tl.constexpr,
@@ -83,6 +84,8 @@ def transform_index_page_table_prefill_kernel(
     result_stride_0: tl.constexpr,
     result_stride_1: tl.constexpr,
     PAGE_TABLE_IS_EXPANDED: tl.constexpr,
+    HAS_CAUSAL_LENS: tl.constexpr,
+    PAGE_TABLE_WIDTH: tl.constexpr,
     TOPK: tl.constexpr,
     BLOCK_Q: tl.constexpr,
     BLOCK_TOPK: tl.constexpr,
@@ -108,7 +111,14 @@ def transform_index_page_table_prefill_kernel(
         mask=mask,
         other=-1,
     )
-    valid_topk_mask = mask & (loaded_topk_indices >= 0)
+    valid_topk_mask = mask & (loaded_topk_indices >= 0) & (loaded_topk_indices < PAGE_TABLE_WIDTH)
+    if HAS_CAUSAL_LENS:
+        causal_len = tl.load(
+            causal_seq_lens_ptr + token_indices,
+            mask=token_indices < query_end,
+            other=0,
+        )
+        valid_topk_mask = valid_topk_mask & (loaded_topk_indices < causal_len[:, None])
 
     if PAGE_TABLE_IS_EXPANDED:
         page_table_rows = token_indices
@@ -181,10 +191,16 @@ def transform_index_page_table_prefill_fast(
     cu_seqlens_q: Optional[torch.Tensor] = None,
     dcp_size: int = 1,
     dcp_rank: int = 0,
+    causal_seq_lens: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     assert page_size == 1
     assert topk_indices.shape[1] == 2048
     real_num_tokens = sum(extend_lens_cpu)
+    if causal_seq_lens is not None:
+        if causal_seq_lens.ndim != 1 or causal_seq_lens.numel() < real_num_tokens:
+            raise ValueError("causal_seq_lens must cover every expanded query row")
+        if causal_seq_lens.device != topk_indices.device or not causal_seq_lens.is_contiguous():
+            raise ValueError("causal_seq_lens must be contiguous and on the query device")
     result = _allocate_prefill_result(topk_indices, real_num_tokens, output_num_tokens)
     if real_num_tokens == 0:
         return result
@@ -208,6 +224,7 @@ def transform_index_page_table_prefill_fast(
         topk_indices,
         cu_seqlens_q,
         result,
+        causal_seq_lens,
         page_table.stride(0),
         page_table.stride(1),
         topk_indices.stride(0),
@@ -215,6 +232,8 @@ def transform_index_page_table_prefill_fast(
         result.stride(0),
         result.stride(1),
         PAGE_TABLE_IS_EXPANDED=page_table_is_expanded,
+        HAS_CAUSAL_LENS=causal_seq_lens is not None,
+        PAGE_TABLE_WIDTH=page_table.shape[1],
         TOPK=topk_indices.shape[1],
         BLOCK_Q=block_q,
         BLOCK_TOPK=block_topk,

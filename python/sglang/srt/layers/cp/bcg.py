@@ -352,6 +352,19 @@ def execute_prefill_cp_bcg(
             static_forward_batch,
             torch.cuda.current_stream(),
         )
+        # DFlash consumes one feature row for every GLOBAL prompt token.
+        # Gathering logits hiddens alone leaves its features CP-local (1/8).
+        # Match EagerRunner's packed-tensor and legacy-list contract.
+        if aux_hidden_states is not None:
+            if isinstance(aux_hidden_states, torch.Tensor):
+                aux_hidden_states = cp_gather_after_forward(
+                    aux_hidden_states, static_forward_batch, torch.cuda.current_stream()
+                )
+            else:
+                aux_hidden_states = [
+                    cp_gather_after_forward(aux, static_forward_batch, torch.cuda.current_stream())
+                    for aux in aux_hidden_states
+                ]
         return model.logits_processor(
             forward_batch.input_ids,
             hidden_states,

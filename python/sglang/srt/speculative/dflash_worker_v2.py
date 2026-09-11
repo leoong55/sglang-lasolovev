@@ -2084,11 +2084,13 @@ class DFlashWorkerV2(BaseSpecWorker):
             batch.seq_lens_cpu = draft_input.nxt_kv_lens_cpu
             batch.seq_lens_sum = int(draft_input.nxt_kv_lens_sum)
 
-        verify_forward_batch, _ = verify_input.prepare_for_verify(
-            batch, self.target_worker
-        )
-        batch.seq_lens_cpu = seq_lens_cpu_backup
-        batch.seq_lens_sum = seq_lens_sum_backup
+        try:
+            verify_forward_batch, _ = verify_input.prepare_for_verify(
+                batch, self.target_worker
+            )
+        finally:
+            batch.seq_lens_cpu = seq_lens_cpu_backup
+            batch.seq_lens_sum = seq_lens_sum_backup
 
         target_out = self.target_worker.forward_batch_generation(
             batch=None,

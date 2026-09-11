@@ -412,6 +412,9 @@ class DeepseekSparseAttnBackend(
         self.device_sm_major = self.device_capability[0]
         self.kv_cache_dtype = model_runner.kv_cache_dtype
 
+        from sglang.srt.layers.cp.glm53_dflash import supports_dflash_dcp
+
+        self.glm53_dflash_dcp = self.dcp_enabled and supports_dflash_dcp(model_runner.server_args)
         if self.dcp_enabled:
             if model_runner.server_args.enable_hierarchical_cache:
                 raise ValueError(
@@ -445,7 +448,11 @@ class DeepseekSparseAttnBackend(
                 )
             if self.hisparse_coordinator is not None:
                 raise ValueError("DSA with DCP does not support HiSparse.")
-            if is_cuda() and model_runner.server_args.speculative_algorithm is not None:
+            if (
+                is_cuda()
+                and model_runner.server_args.speculative_algorithm is not None
+                and not self.glm53_dflash_dcp
+            ):
                 raise ValueError(
                     "DSA with flashmla_kv DCP does not currently support "
                     "speculative decoding on CUDA. Disable speculative decoding "
@@ -2002,6 +2009,15 @@ class DeepseekSparseAttnBackend(
         metadata = self.forward_metadata
         assert causal, "DSA is causal only"
 
+        glm53_verify = (
+            getattr(self, "glm53_dflash_dcp", False)
+            and forward_batch.forward_mode.is_target_verify()
+        )
+        if glm53_verify:
+            from sglang.srt.layers.cp.glm53_dflash import validate_verify_layout
+
+            validate_verify_layout(forward_batch, self.speculative_num_draft_tokens)
+
         dsa_impl = self._dsa_impl_for_batch(forward_batch)
 
         if dsa_impl == "trtllm" and not self.use_mha:
@@ -2129,6 +2145,7 @@ class DeepseekSparseAttnBackend(
                     cu_seqlens_q=metadata.cu_seqlens_q,
                     dcp_size=transform_dcp_size,
                     dcp_rank=transform_dcp_rank,
+                    causal_seq_lens=metadata.dsa_seqlens_expanded if glm53_verify else None,
                 )
 
         # todo hisparse: to cover more backends
@@ -2982,7 +2999,15 @@ class DeepseekSparseAttnBackend(
         cache_seqlens = metadata.dsa_cache_seqlens_int32
         assert metadata.flashmla_metadata is not None
 
-        # TODO the 2nd dim is seq_len_q, need to be >1 when MTP
+        # DSA uses one expanded row per query, including TARGET_VERIFY.
+        # Causality is in the per-row index mask, not a multi-query dense mask.
+        if getattr(self, "glm53_dflash_dcp", False):
+            from sglang.srt.layers.cp.glm53_dflash import validate_flashmla_rows
+
+            validate_flashmla_rows(
+                q_all.shape[0], page_table_1.shape[0], cache_seqlens.numel(),
+                metadata.flashmla_metadata.num_splits.numel(),
+            )
         q_all = q_all.reshape(q_all.shape[0], 1, -1, layer.head_dim)
         num_q_heads = q_all.shape[2]
         target_q_heads = self._flashmla_q_head_bucket(num_q_heads)
