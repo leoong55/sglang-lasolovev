@@ -202,6 +202,13 @@ def resolve_dflash_verify_mask_policy(attn_backend: Any) -> tuple[str, bool]:
             break
         backend = full_backend
     backend_name = type(backend).__name__
+    if backend_name == "DeepseekSparseAttnBackend" and getattr(
+        backend, "glm53_dflash_dcp", False
+    ):
+        # The opt-in DCP path verifies a fixed-width linear block with causal
+        # row bounds. Match live DFlash input construction during graph capture;
+        # supplying the generic tree-mask buffer would select a different path.
+        return backend_name, False
     return backend_name, (backend_name not in _DFLASH_VERIFY_SKIP_CUSTOM_MASK_BACKENDS)
 
 

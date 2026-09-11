@@ -5,6 +5,33 @@ Third stage, based on the DFlash PR. Full target model
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and
 FA4 draft KV in its upstream compute dtype. Initial chunk: 16384.
 
+## v9.3: causal verify capture and the model-stage prefill graph rule
+
+The v9.2 H200 log passes KV allocation and attention-backend profile validation,
+then fails while warming the target verify graph. Capture builds a DFlash input
+through a backend mask policy that did not recognize the opt-in DSA/DCP path;
+it supplied the generic custom-mask buffer, unlike live DFlash's causal input.
+The policy now returns no custom mask for a `DeepseekSparseAttnBackend` whose
+`glm53_dflash_dcp` profile was validated. Wrapper unwrapping is preserved.
+Other backend profiles keep their existing policy, and Eagle retains tree masks.
+The causal-layout validator still rejects custom and ragged masks.
+
+This log also confirms an actual disabled prefill graph mode. Beyond the early
+logging issue fixed in v9.2, `handle_model_specific_adjustments` unconditionally
+disabled DSA CP prefill after CLI graph resolution. That later rule now preserves
+the selected `breakable` mode for the opt-in GLM53 profile. Disabled graphs remain
+disabled; other DSA CP models/topologies retain the old disable rule.
+
+Five CPU regressions execute the actual capture-input builder, mask policy,
+causal validator, CLI graph parser and DSA model rule. The old source reproduces
+both startup failures. Coverage includes verify batches 1/2/4/8/16/32, prefill
+8k/16k/32k, wrapper handling, graph opt-out and retained unsupported-mode checks.
+These tests do not execute CUDA capture. In the next H200 log, check actual
+prefill capture and completion of target/draft verify capture before inference.
+
+Build tag: `glm53-hicache-v9.3-0bcd822377da`. Keep the existing 16k profile and
+`mem-fraction-static 0.75` for the first retry; replace the image only.
+
 ## v9.2: recognize DSA dispatch and its internal kernels separately
 
 The next H200 log confirms the v9.1 pool fix: one draft KV head per GPU,
