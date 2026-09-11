@@ -15,8 +15,12 @@ internal DSA kernel names. The generic pair is `dsa` / `dsa`; the separate
 DSA selectors are `flashmla_sparse_q8` / `flashmla_kv`.
 
 Both gates now validate those fields separately through resolved views.
-This also fixes prefill graphs being disabled by CP/DCP compatibility checks
-despite an explicit `breakable` request. The HiCache requirements remain
+The graph change makes the CP/DCP support and capture-routing predicates
+recognize this DSA profile. The early DSA CP log previously printed a literal
+`backend=disabled` before graph resolution; it was not evidence of the final
+graph mode. That message now says graph resolution happens later. Explicit
+`breakable` bypasses the generic default compatibility policy, while runtime
+CP capture still needs the corrected profile predicate. HiCache still requires
 unified radix, `cache`, `write_through`, `layer_first` and `direct`.
 
 Six CPU regressions execute the actual resolution views, backend selector,
