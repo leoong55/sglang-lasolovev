@@ -32,7 +32,7 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: /metrics
-        glm53-test-profile: cp8-dcp4-hicache-v9.6-nospec-r32-prefill-bcg16384
+        glm53-test-profile: cp8-dcp4-hicache-v9.6-dflash-bounded-r48-prefill-bcg16384
     spec:
       terminationGracePeriodSeconds: 120
       imagePullSecrets:
@@ -80,9 +80,9 @@ spec:
         - --page-size
         - '64'
         - --mem-fraction-static
-        - '0.75'
+        - '0.80'
         - --max-running-requests
-        - '32'
+        - '48'
         - --chunked-prefill-size
         - '16384'
         - --prefill-decode-interval
@@ -118,6 +118,16 @@ spec:
         - cache
         - --hicache-ratio
         - '1.0'
+        - --glm53-draft-cache-window
+        - '2048'
+        - --speculative-algorithm
+        - DFLASH
+        - --speculative-draft-model-path
+        - incoai/GLM-5.3-DFlash2
+        - --speculative-draft-model-quantization
+        - unquant
+        - --speculative-draft-attention-backend
+        - fa4
         - --reasoning-parser
         - glm45
         - --tool-call-parser
@@ -154,7 +164,7 @@ spec:
         - name: SGLANG_GLM53_HICACHE_DCP
           value: '1'
         - name: SGLANG_GLM53_DFLASH_DCP
-          value: '0'
+          value: '1'
         - name: SGLANG_GLM53_PREFILL_BCG
           value: '1'
         ports:

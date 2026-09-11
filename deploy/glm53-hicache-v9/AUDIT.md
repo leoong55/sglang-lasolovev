@@ -1,4 +1,14 @@
-# GLM53 v9.4 audit — 2026-09-11
+# GLM53 runtime audit — 2026-09-11
+
+## v9.6: concurrency and bounded draft
+
+The uploaded 21:51 log establishes a selector graph-buffer overrun at batch 33
+with capture max 32. The patch preserves graph buffer addresses and skips their
+staging for eager batches. The opt-in bounded draft design, allocation formula,
+CPU backing/HiCache behavior and remaining hardware gates are documented at
+the top of README.md. No H200 execution or image build is claimed for v9.6.
+
+## Earlier v9.4 audit
 
 Scope: the cumulative runtime changes from upstream `0bcd822377da` through
 v9.3 `80b93b7f`, the operator's four startup logs, and the CP/DCP, DFlash and

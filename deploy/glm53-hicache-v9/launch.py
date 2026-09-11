@@ -39,6 +39,7 @@ def check_profile(argv):
     p.add_argument("--cuda-graph-bs-prefill", nargs="+", type=int)
     p.add_argument("--cuda-graph-max-bs-prefill", type=int)
     p.add_argument("--speculative-algorithm", choices=["DFLASH"])
+    p.add_argument("--glm53-draft-cache-window", type=int, choices=[0, 2048], default=0)
     p.add_argument("--speculative-draft-model-path")
     p.add_argument("--speculative-draft-model-quantization", choices=["unquant"])
     p.add_argument("--speculative-draft-attention-backend", choices=["fa4"])
@@ -95,7 +96,31 @@ def check_profile(argv):
         args.hicache_io_backend, args.hicache_host_memory_mode,
     )):
         p.error("HiCache requires explicit write_through, layer_first, direct and cache settings")
+    if args.glm53_draft_cache_window and args.speculative_algorithm != "DFLASH":
+        p.error("--glm53-draft-cache-window requires DFLASH")
+    if args.glm53_draft_cache_window:
+        unsupported = {"--enable-unified-memory", "--disaggregation-mode", "--enable-pdmux",
+                       "--enable-memory-saver", "--speculative-draft-window-size"}
+        if any(x.split("=", 1)[0] in unsupported for x in argv):
+            p.error("Bounded draft requires the ordinary colocated pool; remove unified-memory, disaggregation, memory-saver and separate draft-window overrides")
     return args
+
+
+def runtime_argv(argv):
+    """Consume only the launcher-owned bounded-cache option."""
+    result = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "--glm53-draft-cache-window":
+            i += 2
+            continue
+        if token.startswith("--glm53-draft-cache-window="):
+            i += 1
+            continue
+        result.append(token)
+        i += 1
+    return result
 
 
 def configure_runtime_env(profile):
@@ -106,6 +131,7 @@ def configure_runtime_env(profile):
     os.environ["SGLANG_GLM53_DFLASH_DCP"] = "1" if profile.speculative_algorithm == "DFLASH" else "0"
     os.environ["SGLANG_GLM53_HICACHE_DCP"] = "1" if profile.enable_hierarchical_cache else "0"
     os.environ["SGLANG_ENABLE_UNIFIED_RADIX_TREE"] = "1"
+    os.environ["SGLANG_GLM53_DRAFT_CACHE_WINDOW"] = str(profile.glm53_draft_cache_window)
 
 
 if __name__ == "__main__":
@@ -113,8 +139,10 @@ if __name__ == "__main__":
     install(package_root(), Path(__file__).resolve().parent, verify_only=True)
     profile = check_profile(argv)
     configure_runtime_env(profile)
+    argv = runtime_argv(argv)
     print(f"glm53: speculation={profile.speculative_algorithm or 'off'}; "
           f"hicache={profile.enable_hierarchical_cache}; max-running={profile.max_running_requests}; "
+          f"bounded-draft-window={profile.glm53_draft_cache_window}; "
           f"prefill-graphs={profile.cuda_graph_backend_prefill}; "
           f"decode-graphs={profile.cuda_graph_backend_decode}; "
           f"decode-max-bs={profile.cuda_graph_max_bs_decode}; "

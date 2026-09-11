@@ -5,6 +5,61 @@ Third stage, based on the DFlash PR. Full target model
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and
 FA4 draft KV in its upstream compute dtype. Initial chunk: 16384.
 
+## v9.6: fix batch 33 and optionally bound draft GPU KV
+
+The 21:51 operator log fails in `_SelectorDraftSampler.stage_sampling_params`:
+32-row graph buffers are updated from a 33-request batch before eager dispatch.
+`torch.clamp(out=...)` attempts to resize a view, then `greedy_mask.copy_` raises
+`32 != 33`. SIGQUIT and cancelled HTTP requests follow that exception. This is
+not an allocation failure. v9.6 skips graph-parameter staging above capture
+capacity; the existing eager selector uses the live batch sampling parameters.
+Graph addresses remain stable. Running 48 requests with graphs through 32 is
+supported by this fix; expanding graph capture is optional and costs memory.
+
+The new launcher option `--glm53-draft-cache-window 2048` enables a physically
+bounded draft GPU pool. Its default is **0**, preserving the full draft pool.
+It is separate from upstream `--speculative-draft-window-size`, which only
+changes the attention view in this pinned implementation. Do not combine them.
+
+* Each request has a 2560-row ring: the native 2048-token window, page alignment
+  slack and scratch space. Six BF16 K/V layers retain the model's dtype.
+* Target virtual IDs and verification locations stay unchanged. Draft attention
+  gets its own page-aligned request table and physical scratch locations.
+* All committed draft K/V is retained in a pinned CPU backing store. Shared L1
+  prefixes and retracted requests can refill the ring without stale rows.
+  Virtual-ID versions detect allocator reuse; rejected proposals are excluded.
+* HiCache DRAFT sidecars copy between CPU backing and their existing L2 host
+  pool. A restore invalidates ring tags, and refill waits for all six layers.
+  Target FP8 KV and DSA transfers retain their existing paths and write-through
+  producer fence. The backing store is additional to the HiCache L2 allocation.
+* The memory solver reserves the fixed ring and per-virtual-token version table
+  instead of charging full GPU draft K/V per target token.
+
+At 48 requests, K/V tensors including padding require about **0.360 GiB/GPU**,
+plus tags and a 4-byte version entry per logical target slot. At 2,000,000 slots,
+the previous K/V alone used about **5.72 GiB/GPU**. CPU backing then needs another
+5.72 GiB per rank, about 45.8 GiB across eight ranks, before the existing L2 pool.
+These are tensor-size calculations, not measured post-startup memory figures.
+
+[manifest-bounded-48.yaml](manifest-bounded-48.yaml) matches the supplied
+0.80 memory fraction, 48-request limit, 16k prefill, decode graphs through 32,
+DFlash2 and write-through HiCache. It uses image
+`glm53-hicache-v9.6-0bcd822377da` and adds the bounded-cache option. Existing
+manifests keep the full draft pool for comparison. Setting the option to 0
+restores full allocation; removing all speculative options disables DFlash.
+All of these changes require a pod restart.
+
+This opt-in implementation uses blocking D2H materialization and explicit
+window-miss synchronization. Their latency/throughput cost is **unmeasured**.
+CPU regressions execute ring wrap, reuse, last-page indices, actual worker
+projection/accepted-prefix filtering, solver/builder integration, HiCache
+relocation, and stable sampler buffers at 32/33/48/64 requests. H200 startup,
+CUDA graph replay, greedy parity versus the full pool, forced L1/L2 eviction,
+retraction/cancellation and the 300-request benchmark are still required.
+The PR remains draft pending these hardware checks.
+
+Build tag: `glm53-hicache-v9.6-0bcd822377da`.
+
 ## v9.5: independent launch controls and recorded v9.4 result
 
 The operator reports a successful v9.4 run: 300 completed requests, no errors,

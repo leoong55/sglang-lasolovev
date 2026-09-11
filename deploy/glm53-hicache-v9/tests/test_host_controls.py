@@ -83,6 +83,26 @@ class ControlsTest(unittest.TestCase):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 self.check(args)
 
+    def test_bounded_cache_is_explicit_and_consumed_before_server_exec(self):
+        base = args_for(16384, [8192, 16384])
+        for option in (["--glm53-draft-cache-window", "2048"], ["--glm53-draft-cache-window=2048"]):
+            profile = self.check(base + option)
+            self.assertEqual(profile.glm53_draft_cache_window, 2048)
+            self.assertEqual(launch.runtime_argv(base + option), base)
+            with patch.dict(os.environ):
+                launch.configure_runtime_env(profile)
+                self.assertEqual(os.environ["SGLANG_GLM53_DRAFT_CACHE_WINDOW"], "2048")
+                launch.configure_runtime_env(self.check(base))
+                self.assertEqual(os.environ["SGLANG_GLM53_DRAFT_CACHE_WINDOW"], "0")
+        bad = [drop_options(base, ["--speculative-"]) + ["--glm53-draft-cache-window", "2048"],
+               base + ["--glm53-draft-cache-window", "1024"],
+               base + ["--glm53-draft-cache-window", "2048", "--enable-unified-memory"],
+               base + ["--glm53-draft-cache-window", "2048", "--disaggregation-mode", "decode"],
+               base + ["--glm53-draft-cache-window", "2048", "--speculative-draft-window-size", "4096"]]
+        for argv in bad:
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.check(argv)
+
 
 if __name__ == "__main__":
     unittest.main()

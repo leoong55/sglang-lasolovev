@@ -106,6 +106,11 @@ def _dflash_draft_cell_size(kvc: KVCacheConfigurator) -> int:
     cell_size = kvc.spec_aux_config.dflash_draft_cell_size_per_token
     if cell_size is None or int(cell_size) <= 0:
         return 0
+    import os
+    if os.environ.get("SGLANG_GLM53_DRAFT_CACHE_WINDOW") == "2048":
+        # The bounded K/V ring is a fixed allocation. Only the int32 logical
+        # version table scales with the target's virtual token capacity.
+        return 4 * get_parallel().attn_dcp_size
     return int(cell_size) * get_parallel().attn_dcp_size
 
 
@@ -168,6 +173,12 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
             num_layers = kvc.layer_info.num_effective_layers
 
         self._cell_size = self._compute_cell_size(kvc, num_layers)
+        self._bounded_fixed_bytes = 0
+        import os
+        if (os.environ.get("SGLANG_GLM53_DRAFT_CACHE_WINDOW") == "2048"
+                and not kvc.is_draft_worker and kvc.spec_algorithm.is_dflash_family()):
+            from sglang.srt.layers.cp.glm53_draft_layout import bounded_draft_geometry
+            self._bounded_fixed_bytes = bounded_draft_geometry(get_schedule().max_running_requests)[2]
         has_kv_on_another_pp_stage = (
             self._cell_size == 0
             and mambaish is not None
@@ -432,7 +443,7 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
         self, available_bytes: int, page_size: int
     ) -> MemoryPoolConfig:
         max_total_num_tokens = (
-            available_bytes // self._cell_size
+            (available_bytes - getattr(self, "_bounded_fixed_bytes", 0)) // self._cell_size
             if self._cell_size
             else self._zero_kv_max_tokens
         )
