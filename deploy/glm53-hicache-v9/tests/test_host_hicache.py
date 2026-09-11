@@ -99,6 +99,26 @@ class PoolTests(unittest.TestCase):
             for x,expected in zip(device.kv_buffer,want):
                 torch.testing.assert_close(x[new[rank::4]//4],expected)
 
+    def test_draft_kv_relocated_round_trip_preserves_every_virtual_token(self):
+        names={"backup_from_device_all_layer","load_to_device_per_layer","_resolve_device_transfer_buffers"}
+        f=extract("mem_cache/pool_host/mha.py",names,dict(torch=torch,transfer_kv_direct=direct_copy),"MHATokenToKVPoolHost")
+        cls=type("DraftHost",(self.base(),),vars(f))
+        host=cls();host.layout="layer_first";host.page_size=256;host.mtp_draft_device_pools=()
+        host.k_buffer=[torch.zeros((1024,2,8),dtype=torch.bfloat16) for _ in range(2)]
+        host.v_buffer=[torch.zeros_like(x) for x in host.k_buffer]
+        host.host_kv_data_refs=host.k_buffer+host.v_buffer
+        device=NS(k_data_ptrs=None,v_data_ptrs=None,
+                  k_buffer=[torch.randn((2048,2,8),dtype=torch.bfloat16) for _ in range(2)],
+                  v_buffer=[torch.randn((2048,2,8),dtype=torch.bfloat16) for _ in range(2)])
+        host.device_pool=device
+        old=torch.arange(512,768);new=torch.arange(1536,1792);host_ids=torch.arange(768,1024)
+        want=[x[old].clone() for x in device.k_buffer+device.v_buffer]
+        host.backup_from_device_all_layer(device,host_ids,old,"direct")
+        for x in device.k_buffer+device.v_buffer:x.zero_()
+        for layer in range(2):host.load_to_device_per_layer(device,host_ids,new,layer,"direct")
+        for x,expected in zip(device.k_buffer+device.v_buffer,want):
+            torch.testing.assert_close(x[new],expected,rtol=0,atol=0)
+
     def test_draft_uses_full_logical_capacity_and_shared_indices(self):
         fake_dsa=type("DSA",(),{});fake_hybrid=type("Hybrid",(),{})
         pool=NS(size=2048,layer_num=2)
