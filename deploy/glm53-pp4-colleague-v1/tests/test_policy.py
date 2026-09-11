@@ -181,7 +181,6 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(a.budget_state(), Result.OTHER)
 
 
-
 class SchedulerChunkAccountingTests(unittest.TestCase):
     def test_parked_chunk_is_not_counted_as_submitted_work(self):
         tree = ast.parse((POLICY / "scheduler.py").read_text())
