@@ -13,7 +13,9 @@ def enabled():
 
 
 def unique_live(requests):
-    return list({id(r): r for r in requests if r is not None and not r.finished()}.values())
+    return list(
+        {id(r): r for r in requests if r is not None and not r.finished()}.values()
+    )
 
 
 def future_tokens(req, page_size):
@@ -39,9 +41,11 @@ class FullNeedBudget:
 
     def can_admit(self, candidate, selected):
         live = unique_live([*self.live(selected), candidate])
-        return len(live) <= self.max_running and sum(
-            future_tokens(r, self.page_size) for r in live
-        ) <= self.free_tokens()
+        return (
+            len(live) <= self.max_running
+            and sum(future_tokens(r, self.page_size) for r in live)
+            <= self.free_tokens()
+        )
 
     def chunk_cap(self, candidate, selected, requested):
         # Do not charge the chunk's own entire future against its next step.

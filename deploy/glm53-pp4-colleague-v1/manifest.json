@@ -4,17 +4,17 @@
     {
       "path": "srt/managers/scheduler.py",
       "base_sha256": "3a12fdfb9c21571d8007ba60aedd7e84b67636583bac8243373c75d6a2ab324e",
-      "patched_sha256": "8132056ecf73a93d773ef066004847a33880153db7449481e44e310731049bf6"
+      "patched_sha256": "31054a5c605fae1ad4803644977781630377372fde568b1d3f1a64b08f3269e0"
     },
     {
       "path": "srt/managers/schedule_policy.py",
       "base_sha256": "5ceae6ad98493297bf557fdb38b6e53f654319e26238c9e4e22a00aead230e3c",
-      "patched_sha256": "f3f1601e77d7cdb8a322555771a435a49db52d965eb0754adad368667f58e9a9"
+      "patched_sha256": "119846fab01dedd00c5f4a0e7da1baa4495d6b753c39035d7b3cc952d6e98559"
     },
     {
       "path": "srt/managers/pp_full_need.py",
       "base_sha256": null,
-      "patched_sha256": "6b7ec5b96104006aeab36db5fd0cee168b6641e0e7e9d3f0616fb7b9afde3a9a"
+      "patched_sha256": "261fb4d3e13cb6d5345173a3b04ed95a113d3e9f1f5dd1bcde1bd5df65ee0a44"
     },
     {
       "path": "srt/models/deepseek_v2.py",

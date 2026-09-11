@@ -1,5 +1,5 @@
 diff --git a/python/sglang/srt/managers/schedule_policy.py b/python/sglang/srt/managers/schedule_policy.py
-index ae9fa0d..05fe8ac 100644
+index ae9fa0d..8e9b7b3 100644
 --- a/python/sglang/srt/managers/schedule_policy.py
 +++ b/python/sglang/srt/managers/schedule_policy.py
 @@ -494,7 +494,9 @@ class PrefillAdder:
@@ -54,7 +54,7 @@ index ae9fa0d..05fe8ac 100644
          # A mid-chunk rank prefills this pass regardless of the delayer
          # verdict, so report prefillable=True and ignore the result.
          if self.prefill_delayer_single_pass is not None:
-@@ -1213,6 +1234,17 @@ class PrefillAdder:
+@@ -1213,6 +1234,19 @@ class PrefillAdder:
              return AddReqResult.NO_TOKEN
  
          chunk_tokens_limit = self.rem_chunk_tokens
@@ -63,7 +63,9 @@ index ae9fa0d..05fe8ac 100644
 +            and (has_chunked_req or self.new_chunked_req is not None)
 +            and chunk_tokens_limit is not None
 +            and real_input_tokens > chunk_tokens_limit
-+            and not self.full_need_budget.short_fits(real_input_tokens, self.rem_chunk_tokens)
++            and not self.full_need_budget.short_fits(
++                real_input_tokens, self.rem_chunk_tokens
++            )
 +        ):
 +            # A parked chunk still owns the single chunked_req slot. Do not
 +            # create a second long prefill and overwrite it. Short full
@@ -72,18 +74,19 @@ index ae9fa0d..05fe8ac 100644
          if self.is_hybrid_swa:
              # host-hit prefix is loaded back, not re-prefilled, so the SWA peak is
              # driven only by the freshly-prefilled tail (the loaded window is
-@@ -1247,6 +1279,10 @@ class PrefillAdder:
+@@ -1247,6 +1281,11 @@ class PrefillAdder:
              return AddReqResult.OTHER
  
          with self._lock_node(req.last_node):
-+            if self.full_need_budget is not None and not self.full_need_budget.can_admit(
-+                req, self.can_run_list
++            if (
++                self.full_need_budget is not None
++                and not self.full_need_budget.can_admit(req, self.can_run_list)
 +            ):
 +                return AddReqResult.NO_TOKEN
              # self.rem_total_tokens may decrease after the lock acquisition
              if total_tokens >= self.rem_total_tokens:
                  return AddReqResult.NO_TOKEN
-@@ -1327,7 +1363,14 @@ class PrefillAdder:
+@@ -1327,7 +1366,16 @@ class PrefillAdder:
  
                  self._add_dllm_req(req, prefix_len)
                  self._req_inc_lock_ref(req)
@@ -93,23 +96,27 @@ index ae9fa0d..05fe8ac 100644
 +                or input_tokens <= chunk_tokens_limit
 +                or (
 +                    self.full_need_budget is not None
-+                    and self.full_need_budget.short_fits(input_tokens, self.rem_chunk_tokens)
++                    and self.full_need_budget.short_fits(
++                        input_tokens, self.rem_chunk_tokens
++                    )
 +                )
 +            ):
                  if (
                      tile_stop := self._check_prefill_tile_budget(input_tokens)
                  ) is not None:
 diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
-index bccbf46..20908c9 100644
+index bccbf46..a88734e 100644
 --- a/python/sglang/srt/managers/scheduler.py
 +++ b/python/sglang/srt/managers/scheduler.py
-@@ -3605,6 +3605,37 @@ class Scheduler(
+@@ -3605,6 +3605,44 @@ class Scheduler(
          else:
              prefill_tile_block_m = 64  # Fallback for non-Triton backends
  
 +        from sglang.srt.managers.pp_full_need import (
-+            FitScan, FullNeedBudget, enabled as pp_full_need_enabled,
++            FitScan,
++            FullNeedBudget,
 +        )
++        from sglang.srt.managers.pp_full_need import enabled as pp_full_need_enabled
 +
 +        full_need_budget = None
 +        fit_scan = None
@@ -122,10 +129,13 @@ index bccbf46..20908c9 100644
 +                or self.dllm_config is not None
 +                or self.enable_priority_preemption
 +            ):
-+                raise ValueError("PP full-need requires PP, full attention, radix cache, no preemption")
++                raise ValueError(
++                    "PP full-need requires PP, full attention, radix cache, no preemption"
++                )
 +            full_need_budget = FullNeedBudget(
 +                inflight=lambda: [
-+                    *self.collect_inflight_reqs(), self.chunked_req,
++                    *self.collect_inflight_reqs(),
++                    self.chunked_req,
 +                    *running_batch.reqs,
 +                ],
 +                free_tokens=lambda: (
@@ -134,14 +144,16 @@ index bccbf46..20908c9 100644
 +                ),
 +                page_size=self.page_size,
 +                max_running=self.max_running_requests,
-+                short_tokens=int(os.environ.get("SGLANG_PP_SHORT_BYPASS_TOKENS", "512")),
++                short_tokens=int(
++                    os.environ.get("SGLANG_PP_SHORT_BYPASS_TOKENS", "512")
++                ),
 +            )
 +            fit_scan = FitScan()
 +
          adder = PrefillAdder(
              self.page_size,
              self.tree_cache,
-@@ -3622,6 +3653,7 @@ class Scheduler(
+@@ -3622,6 +3660,7 @@ class Scheduler(
              dllm_config=self.dllm_config,
              waiting_queue_len=len(self.waiting_queue),
              prefill_tile_block_m=prefill_tile_block_m,
@@ -149,7 +161,7 @@ index bccbf46..20908c9 100644
          )
  
          if self.chunked_req is not None:
-@@ -3711,6 +3743,10 @@ class Scheduler(
+@@ -3711,6 +3750,10 @@ class Scheduler(
              if self.enable_lora:
                  running_loras.add(req.lora_id)
  
@@ -160,7 +172,7 @@ index bccbf46..20908c9 100644
              if res != AddReqResult.CONTINUE:
                  if res == AddReqResult.NO_TOKEN:
                      if self.enable_hierarchical_cache:
-@@ -3735,6 +3771,18 @@ class Scheduler(
+@@ -3735,6 +3778,18 @@ class Scheduler(
                              req.kv.mamba_pool_idx.unsqueeze(-1)
                          )
                          req.kv.mamba_pool_idx = None
@@ -179,7 +191,7 @@ index bccbf46..20908c9 100644
                  break
  
          if mamba_allocator is not None:
-@@ -3742,6 +3790,14 @@ class Scheduler(
+@@ -3742,6 +3797,14 @@ class Scheduler(
  
          # Update waiting queue
          can_run_list: List[Req] = adder.can_run_list

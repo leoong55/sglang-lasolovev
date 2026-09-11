@@ -3606,8 +3606,10 @@ class Scheduler(
             prefill_tile_block_m = 64  # Fallback for non-Triton backends
 
         from sglang.srt.managers.pp_full_need import (
-            FitScan, FullNeedBudget, enabled as pp_full_need_enabled,
+            FitScan,
+            FullNeedBudget,
         )
+        from sglang.srt.managers.pp_full_need import enabled as pp_full_need_enabled
 
         full_need_budget = None
         fit_scan = None
@@ -3620,10 +3622,13 @@ class Scheduler(
                 or self.dllm_config is not None
                 or self.enable_priority_preemption
             ):
-                raise ValueError("PP full-need requires PP, full attention, radix cache, no preemption")
+                raise ValueError(
+                    "PP full-need requires PP, full attention, radix cache, no preemption"
+                )
             full_need_budget = FullNeedBudget(
                 inflight=lambda: [
-                    *self.collect_inflight_reqs(), self.chunked_req,
+                    *self.collect_inflight_reqs(),
+                    self.chunked_req,
                     *running_batch.reqs,
                 ],
                 free_tokens=lambda: (
@@ -3632,7 +3637,9 @@ class Scheduler(
                 ),
                 page_size=self.page_size,
                 max_running=self.max_running_requests,
-                short_tokens=int(os.environ.get("SGLANG_PP_SHORT_BYPASS_TOKENS", "512")),
+                short_tokens=int(
+                    os.environ.get("SGLANG_PP_SHORT_BYPASS_TOKENS", "512")
+                ),
             )
             fit_scan = FitScan()
 

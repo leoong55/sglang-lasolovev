@@ -1239,7 +1239,9 @@ class PrefillAdder:
             and (has_chunked_req or self.new_chunked_req is not None)
             and chunk_tokens_limit is not None
             and real_input_tokens > chunk_tokens_limit
-            and not self.full_need_budget.short_fits(real_input_tokens, self.rem_chunk_tokens)
+            and not self.full_need_budget.short_fits(
+                real_input_tokens, self.rem_chunk_tokens
+            )
         ):
             # A parked chunk still owns the single chunked_req slot. Do not
             # create a second long prefill and overwrite it. Short full
@@ -1279,8 +1281,9 @@ class PrefillAdder:
             return AddReqResult.OTHER
 
         with self._lock_node(req.last_node):
-            if self.full_need_budget is not None and not self.full_need_budget.can_admit(
-                req, self.can_run_list
+            if (
+                self.full_need_budget is not None
+                and not self.full_need_budget.can_admit(req, self.can_run_list)
             ):
                 return AddReqResult.NO_TOKEN
             # self.rem_total_tokens may decrease after the lock acquisition
@@ -1368,7 +1371,9 @@ class PrefillAdder:
                 or input_tokens <= chunk_tokens_limit
                 or (
                     self.full_need_budget is not None
-                    and self.full_need_budget.short_fits(input_tokens, self.rem_chunk_tokens)
+                    and self.full_need_budget.short_fits(
+                        input_tokens, self.rem_chunk_tokens
+                    )
                 )
             ):
                 if (

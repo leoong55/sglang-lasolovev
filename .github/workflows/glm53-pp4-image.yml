@@ -56,7 +56,7 @@ jobs:
             ${{ steps.meta.outputs.image }}
             ghcr.io/leoong55/sglang-lasolovev:glm53-pp4-colleague-v1
           build-args: |
-            BASE_IMAGE=${{ vars.GLM53_PP4_BASE_IMAGE || 'lmsysorg/sglang:v0.5.19-latest-0bcd822377da' }}
+            BASE_IMAGE=${{ vars.GLM53_PP4_BASE_IMAGE || 'lmsysorg/sglang:v0.5.19-cu130@sha256:d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9' }}
             SOURCE_COMMIT=${{ steps.meta.outputs.commit }}
       - name: Record pull reference
         env:

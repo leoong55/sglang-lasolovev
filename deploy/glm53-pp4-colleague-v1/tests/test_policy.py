@@ -7,16 +7,23 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 
 ROOT = Path(__file__).resolve().parents[3]
-POLICY = ROOT / 'python/sglang/srt/managers'
-spec = importlib.util.spec_from_file_location('pp_full_need', POLICY / 'pp_full_need.py')
+POLICY = ROOT / "python/sglang/srt/managers"
+spec = importlib.util.spec_from_file_location(
+    "pp_full_need", POLICY / "pp_full_need.py"
+)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 
 def req(prompt=75000, output=1000, held=0, prefix=0, finished=False):
-    r = NS(origin_input_ids=range(prompt), output_ids=[], prefix_indices=range(prefix),
-           kv=NS(kv_allocated_len=held), sampling_params=NS(max_new_tokens=output),
-           finished=lambda: finished)
+    r = NS(
+        origin_input_ids=range(prompt),
+        output_ids=[],
+        prefix_indices=range(prefix),
+        kv=NS(kv_allocated_len=held),
+        sampling_params=NS(max_new_tokens=output),
+        finished=lambda: finished,
+    )
     return r
 
 
@@ -55,7 +62,9 @@ class BudgetTests(unittest.TestCase):
     def test_chunk_uses_own_reservation_and_parks_under_pressure(self):
         a, b = req(held=4096), req(held=75000)
         other = m.future_tokens(b, 64)
-        self.assertEqual(self.budget([a, b], other + 4160).chunk_cap(a, [a], 4096), 4096)
+        self.assertEqual(
+            self.budget([a, b], other + 4160).chunk_cap(a, [a], 4096), 4096
+        )
         self.assertEqual(self.budget([a, b], other + 127).chunk_cap(a, [], 4096), 0)
 
     def test_short_bypass_is_a_total_batch_quota(self):
@@ -82,13 +91,24 @@ class BudgetTests(unittest.TestCase):
 
 # Execute the real patched PrefillAdder methods with fake pools, without CUDA
 # imports. This catches wiring/lock regressions, not just helper arithmetic.
-source = ast.parse((POLICY / 'schedule_policy.py').read_text())
-selected = [n for n in source.body if isinstance(n, ast.ClassDef) and n.name in ('AddReqResult', 'PrefillAdder')]
-future = ast.parse('from __future__ import annotations').body
+source = ast.parse((POLICY / "schedule_policy.py").read_text())
+selected = [
+    n
+    for n in source.body
+    if isinstance(n, ast.ClassDef) and n.name in ("AddReqResult", "PrefillAdder")
+]
+future = ast.parse("from __future__ import annotations").body
 ns = dict(Enum=Enum, auto=auto, contextmanager=contextmanager, CLIP_MAX_NEW_TOKENS=4096)
-exec(compile(ast.Module(body=future + selected, type_ignores=[]), 'schedule_policy.py', 'exec'), ns)
-Adder = ns['PrefillAdder']
-Result = ns['AddReqResult']
+exec(
+    compile(
+        ast.Module(body=future + selected, type_ignores=[]),
+        "schedule_policy.py",
+        "exec",
+    ),
+    ns,
+)
+Adder = ns["PrefillAdder"]
+Result = ns["AddReqResult"]
 
 
 class IntegrationTests(unittest.TestCase):
@@ -114,14 +134,16 @@ class IntegrationTests(unittest.TestCase):
 
     def test_admission_check_is_inside_balanced_prefix_lock(self):
         events = []
+
         class Budget:
             def can_admit(self, r, selected):
-                self_outer.assertEqual(events, ['lock'])
+                self_outer.assertEqual(events, ["lock"])
                 return False
+
         self_outer = self
         a = self.adder(Budget())
-        a.tree_cache.inc_lock_ref = lambda node: events.append('lock')
-        a.tree_cache.dec_lock_ref = lambda node: events.append('unlock')
+        a.tree_cache.inc_lock_ref = lambda node: events.append("lock")
+        a.tree_cache.dec_lock_ref = lambda node: events.append("unlock")
         a.tree_cache.is_tree_cache = lambda: False
         r = req(prefix=60000)
         r.sampling_params.ignore_eos = False
@@ -129,7 +151,7 @@ class IntegrationTests(unittest.TestCase):
         r.host_hit_length = 0
         r.last_node = object()
         self.assertEqual(a.add_one_req(r, False, None), Result.NO_TOKEN)
-        self.assertEqual(events, ['lock', 'unlock'])
+        self.assertEqual(events, ["lock", "unlock"])
         self.assertEqual(a.can_run_list, [])
 
     def test_park_keeps_request_without_mutating_range(self):
@@ -159,5 +181,5 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(a.budget_state(), Result.OTHER)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 # The installer verifies the exact upstream source, even if this tag is moved.
-ARG BASE_IMAGE=lmsysorg/sglang:v0.5.19-latest-0bcd822377da
+ARG BASE_IMAGE=lmsysorg/sglang:v0.5.19-cu130@sha256:d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9
 FROM ${BASE_IMAGE}
 USER root
 ARG SOURCE_COMMIT=unknown

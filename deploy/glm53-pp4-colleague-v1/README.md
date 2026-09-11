@@ -64,7 +64,9 @@ GHCR. Публикуемые теги при успешном запуске:
 PR не означает, что образ уже опубликован. Пакет GHCR может требовать login,
 если его видимость private; при необходимости публикуйте в своём registry.
 
-По умолчанию CI пытается получить публичный образ с тем же upstream-тегом.
+По умолчанию CI использует официальный v0.5.19-cu130 с закреплённым digest.
+Тег частного зеркала с SHA в имени отсутствует на Docker Hub; версия защищённых
+исходников всё равно проверяется установщиком, независимо от имени образа.
 Если он недоступен, задайте repository variable `GLM53_PP4_BASE_IMAGE` на
 доступный **непатченный** образ этой базы. Инсталлятор сверяет восемь файлов,
 включая модель, W4AFP8 и PP scheduler, и откажется от несовместимого образа.
@@ -78,7 +80,7 @@ git switch --detach origin/work/glm53-pp4-colleague
 
 docker build \
   -f deploy/glm53-pp4-colleague-v1/Dockerfile \
-  --build-arg BASE_IMAGE=lmsysorg/sglang:v0.5.19-latest-0bcd822377da \
+  --build-arg BASE_IMAGE=lmsysorg/sglang:v0.5.19-cu130@sha256:d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9 \
   --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" \
   -t ghcr.io/leoong55/sglang-lasolovev:glm53-pp4-colleague-v1 .
 
