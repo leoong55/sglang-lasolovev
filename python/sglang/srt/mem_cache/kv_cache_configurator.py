@@ -95,11 +95,30 @@ logger = logging.getLogger(__name__)
 
 def _should_elide_dsa_index_k(*, is_draft_worker: bool) -> bool:
     memory_config = get_memory()
+    if (
+        memory_config.enable_hisparse
+        or is_draft_worker
+        or get_disagg().disaggregation_mode != "null"
+    ):
+        return False
+    if not memory_config.enable_hierarchical_cache:
+        return True
+
+    # Both the GPU allocator and its sizing code call this predicate. Enable
+    # sparse index storage only with the HiCache path whose packed host-layer
+    # mapping preserves logical layer completion and replicated DCP index pages.
+    if not envs.SGLANG_GLM53_HICACHE_INDEX_ELISION.get():
+        return False
+    parallel = get_parallel()
     return (
-        not memory_config.enable_hisparse
-        and not is_draft_worker
-        and not memory_config.enable_hierarchical_cache
-        and get_disagg().disaggregation_mode == "null"
+        memory_config.hicache_io_backend == "direct"
+        and memory_config.hicache_mem_layout == "layer_first"
+        and memory_config.hicache_write_policy == "write_through"
+        and memory_config.hicache_host_memory_mode == "cache"
+        and memory_config.hicache_storage_backend is None
+        and parallel.attn_cp_size == 8
+        and parallel.attn_dcp_size == 4
+        and not parallel.enable_dsa_cache_layer_split
     )
 
 

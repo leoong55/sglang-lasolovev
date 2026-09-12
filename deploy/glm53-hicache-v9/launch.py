@@ -132,6 +132,14 @@ def configure_runtime_env(profile):
     os.environ["SGLANG_GLM53_HICACHE_DCP"] = "1" if profile.enable_hierarchical_cache else "0"
     os.environ["SGLANG_ENABLE_UNIFIED_RADIX_TREE"] = "1"
     os.environ["SGLANG_GLM53_DRAFT_CACHE_WINDOW"] = str(profile.glm53_draft_cache_window)
+    for name, enabled in (
+        ("SGLANG_GLM53_HICACHE_INDEX_ELISION", profile.enable_hierarchical_cache),
+        ("SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH", bool(profile.glm53_draft_cache_window)),
+    ):
+        value = os.environ.get(name, "1")
+        if value not in ("0", "1"):
+            raise ValueError(f"{name} must be 0 or 1")
+        os.environ[name] = value if enabled else "0"
 
 
 if __name__ == "__main__":
@@ -143,6 +151,8 @@ if __name__ == "__main__":
     print(f"glm53: speculation={profile.speculative_algorithm or 'off'}; "
           f"hicache={profile.enable_hierarchical_cache}; max-running={profile.max_running_requests}; "
           f"bounded-draft-window={profile.glm53_draft_cache_window}; "
+          f"hicache-index-elision={os.environ['SGLANG_GLM53_HICACHE_INDEX_ELISION']}; "
+          f"bounded-draft-fastpath={os.environ['SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH']}; "
           f"prefill-graphs={profile.cuda_graph_backend_prefill}; "
           f"decode-graphs={profile.cuda_graph_backend_decode}; "
           f"decode-max-bs={profile.cuda_graph_max_bs_decode}; "

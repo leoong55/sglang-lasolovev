@@ -47,6 +47,25 @@ class ControlsTest(unittest.TestCase):
                     self.assertEqual(os.environ["SGLANG_GLM53_DFLASH_DCP"], str(int(speculation)))
                     self.assertEqual(os.environ["SGLANG_GLM53_HICACHE_DCP"], str(int(cache)))
 
+    def test_performance_switches_default_on_and_preserve_explicit_opt_out(self):
+        argv = args_for(16384, [8192, 16384]) + ["--glm53-draft-cache-window", "2048"]
+        profile = self.check(argv)
+        names = ("SGLANG_GLM53_HICACHE_INDEX_ELISION", "SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH")
+        for overrides in ({}, {names[0]: "0"}, {names[1]: "0"}):
+            with patch.dict(os.environ, overrides, clear=True):
+                launch.configure_runtime_env(profile)
+                for name in names:
+                    self.assertEqual(os.environ[name], overrides.get(name, "1"))
+        profile.enable_hierarchical_cache = False
+        profile.glm53_draft_cache_window = 0
+        with patch.dict(os.environ, {name: "1" for name in names}, clear=True):
+            launch.configure_runtime_env(profile)
+            for name in names:
+                self.assertEqual(os.environ[name], "0")
+        for name in names:
+            with patch.dict(os.environ, {name: "yes"}, clear=True), self.assertRaisesRegex(ValueError, name):
+                launch.configure_runtime_env(profile)
+
     def test_running_limit_and_decode_capture_limit_are_independent(self):
         for maximum in (1, 32, 40, 48, 64, 96, 128):
             args = replace_value(args_for(16384, [16384]), "--max-running-requests", maximum)

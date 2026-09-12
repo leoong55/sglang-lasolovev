@@ -1,5 +1,41 @@
 # GLM53 runtime audit — 2026-09-11
 
+## v9.7: HiCache producer layers and continuous bounded draft decode
+
+The new patch is based on v9.6 `640535efa1896354992191573e0f137c2fba7fa9`.
+The operator's prefix20 baseline is recorded separately; no GPU profile was
+provided, so this patch makes no measured throughput or latency claim.
+
+HiCache index elision is guarded by the same predicate in the GPU allocation
+and memory solver. For the supported direct/layer_first/write_through CP8/DCP4
+profile, the host packs producer layers and filters zero-row DMA pointers.
+Logical callback IDs and completion events are retained. Tests execute the
+actual solver, factory and host methods with byte-copy substitutes for DMA;
+they cover all four DCP ranks, relocated pages, skipped layers and MTP tails.
+
+Draft continuity was checked independently against scheduler overlap and radix
+cache lifecycle. A late prefill result can repoint a prefix after the first
+decode forward; owner identity alone is insufficient. The fast path also
+checks prefix-tensor identity and protected-prefix length. Retraction, slot
+reuse, prefill, clear and L2 restore invalidate continuity; the restore
+completion fence executes before the epoch check. CPU FA4 planning uses a
+monotonic bound capped at 2303 for the logical DCP page256, while GPU lengths
+remain exact. The physical CLI page64 must not determine that bound.
+
+Local validation: **192 CPU/interpreter tests passed** across the v7/v8/v9
+build kits, including 8 new producer-index tests, 6 new bounded-continuity tests
+and 1 independent-switch test. **34 existing SM90 bridge specializations
+compiled** with PyTorch 2.5.1+cpu / Triton 3.1.0. The continuous ring test covers
+560 iterations with variable acceptance and request reordering. Compilation
+and CPU substitution do not validate GPU DMA, FlashMLA/FA4 execution or replay.
+
+Synchronous durable draft backing and accepted-row filtering still exist.
+This revision does not change the speculative verification algorithm or add
+32-head FlashMLA/alternative DCP collectives. H200 output parity under cache
+eviction/restore and the supplied benchmark remain required hardware checks.
+
+Earlier audit entries below describe their respective original revisions.
+
 ## v9.6: concurrency and bounded draft
 
 The uploaded 21:51 log establishes a selector graph-buffer overrun at batch 33

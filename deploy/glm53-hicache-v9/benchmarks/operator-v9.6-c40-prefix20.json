@@ -1,0 +1,51 @@
+{
+  "source": "Operator-pasted vllm bench serve result in the GLM53 optimization discussion",
+  "runtime": {
+    "image_from_last_supplied_manifest": "glm53-hicache-v9.6-0bcd822377da",
+    "image_verified_by_this_benchmark_log": false,
+    "source_revision_for_patch_base": "640535efa1896354992191573e0f137c2fba7fa9"
+  },
+  "benchmark": {
+    "backend": "openai-chat",
+    "endpoint": "/v1/chat/completions",
+    "model": "GLM-5.3",
+    "tokenizer": "PhalaCloud/GLM-5.3-W4AFP8",
+    "dataset_name": "prefix_repetition",
+    "prefix_len": 60000,
+    "suffix_len": 15000,
+    "output_len": 1000,
+    "num_prefixes": 20,
+    "num_prompts": 300,
+    "max_concurrency": 40,
+    "request_rate": "inf",
+    "num_warmups": 1,
+    "seed": 0,
+    "ignore_eos": true,
+    "temperature": 0.3,
+    "extra_body": {"chat_template_kwargs": {"enable_thinking": true}},
+    "result_filename": "glm53-dcp4-c40-prefix20.json"
+  },
+  "metrics": {
+    "successful_requests": 300,
+    "failed_requests": 0,
+    "duration_s": 585.08,
+    "input_tokens": 22503605,
+    "output_tokens": 300000,
+    "request_throughput": 0.51,
+    "output_token_throughput": 512.75,
+    "peak_output_token_throughput": 363.00,
+    "peak_concurrent_requests": 44.00,
+    "total_token_throughput": 38975.49,
+    "ttft_ms": {"mean": 8986.77, "median": 1422.48, "p50": 1422.48, "p95": 68419.79, "p99": 87624.64},
+    "tpot_ms": {"mean": 66.81, "median": 65.59, "p50": 65.59, "p95": 99.40, "p99": 134.41},
+    "itl_ms": {"mean": 236.26, "median": 123.78, "p50": 123.78, "p95": 895.39, "p99": 1050.58},
+    "e2el_ms": {"mean": 75732.97, "median": 67922.67, "p50": 67922.67, "p95": 152827.34, "p99": 166629.75}
+  },
+  "limitations": [
+    "No per-request result JSON or simultaneous server/GPU trace was supplied.",
+    "One warmup request does not warm all twenty prefixes.",
+    "Reported peak concurrency/throughput are client metrics, not scheduler batch or GPU kernel measurements.",
+    "Total input tokens include cached tokens; total token throughput is not computed-prefill throughput.",
+    "This run is a baseline for the next A/B, not proof of a regression caused by bounded draft."
+  ]
+}

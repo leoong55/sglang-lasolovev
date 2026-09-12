@@ -73,9 +73,43 @@ class DSAIndexerPoolHost(HostKVCache):
         self.dtype = device_pool.store_dtype
         self.start_layer = device_pool.start_layer
         self.end_layer = device_pool.end_layer
-        self.target_layer_num = self._effective_host_layer_num()
+        # Controller callbacks use logical (PP-local) target layer IDs, even
+        # when only producer layers own index-K. Pack those producers on the
+        # host, retaining an explicit mapping instead of renumbering callbacks.
+        skip_layers = getattr(device_pool, "skip_topk_layers", None)
+        if skip_layers is None:
+            skip_layers = [False] * device_pool.layer_num
+        if len(skip_layers) != device_pool.layer_num:
+            raise ValueError("DSA indexer skip mask must match target layer count")
+        if self._is_device_layer_sharded(device_pool):
+            # Sparse layer-sharded buffers also contain scratch storage; keep
+            # this combination disabled until its ownership contract is tested.
+            if any(skip_layers):
+                raise ValueError(
+                    "Sparse DSA indexer HiCache does not support layer sharding"
+                )
+            self.target_host_layer_mapping = {
+                layer: self._host_layer_index(layer)
+                for layer in self._owned_device_layer_ids(device_pool)
+            }
+            self.target_layer_num = self._effective_host_layer_num()
+        else:
+            producer_layers = [
+                layer for layer, skip in enumerate(skip_layers) if not skip
+            ]
+            self.target_host_layer_mapping = {
+                layer: slot for slot, layer in enumerate(producer_layers)
+            }
+            self.target_layer_num = len(producer_layers)
         self.mtp_draft_device_pools = anchor_host.mtp_draft_device_pools
         self.layer_num = self.target_layer_num + len(self.mtp_draft_device_pools)
+        if self.target_layer_num < device_pool.layer_num:
+            logger.info(
+                "DSA indexer HiCache stores %d/%d target layers; logical layer "
+                "completion and DCP token indices are unchanged.",
+                self.target_layer_num,
+                device_pool.layer_num,
+            )
 
         self.index_head_dim = device_pool.index_head_dim
         self.indexer_quant_block_size = device_pool.quant_block_size
@@ -142,10 +176,21 @@ class DSAIndexerPoolHost(HostKVCache):
 
     def init_kv_buffer(self):
         alloc_func = ALLOC_MEMORY_FUNCS[self.device_pool.device]
-        device_pools = (self.device_pool, *self.mtp_draft_device_pools)
+        # Never pass 0-row placeholders to all-layer DMA. In particular a null
+        # pointer in the old logical-layer list would corrupt a compact pool.
         self.packed_device_index_buffers = [
-            buffer for pool in device_pools for buffer in pool.index_k_with_scale_buffer
+            self.device_pool.index_k_with_scale_buffer[layer]
+            for layer in self.target_host_layer_mapping
         ]
+        for pool in self.mtp_draft_device_pools:
+            buffers = pool.index_k_with_scale_buffer
+            if len(buffers) != 1 or buffers[0].shape[0] == 0:
+                raise ValueError(
+                    "Each packed MTP indexer pool must have one stored layer"
+                )
+            self.packed_device_index_buffers.append(buffers[0])
+        if any(buffer.shape[0] == 0 for buffer in self.packed_device_index_buffers):
+            raise ValueError("DSA indexer producer layer has no device storage")
         self.index_k_device_ptrs = torch.tensor(
             [x.data_ptr() for x in self.packed_device_index_buffers],
             dtype=torch.uint64,
@@ -234,11 +279,10 @@ class DSAIndexerPoolHost(HostKVCache):
         *,
         is_draft: bool = False,
     ):
-        if not is_draft and not self._is_device_layer_owned(device_pool, layer_id):
+        resolved = self._resolve_indexer_layer(layer_id, is_draft=is_draft)
+        if resolved is None:
             return
-        # MTP draft layers do not participate in CP layer sharding.
-        host_layer_id = layer_id if is_draft else self._host_layer_index(layer_id)
-        device_layer_id = 0 if is_draft else layer_id
+        host_layer_id, device_layer_id = resolved
 
         host_page_indices, device_page_indices = self._get_indexer_page_indices(
             host_indices, device_indices
@@ -288,6 +332,21 @@ class DSAIndexerPoolHost(HostKVCache):
         else:
             raise ValueError(f"Unsupported IO backend: {io_backend}")
 
+    def _resolve_indexer_layer(self, layer_id: int, *, is_draft: bool):
+        if is_draft:
+            # The controller appends MTP IDs after the *logical* target layers,
+            # whereas physical host storage appends them after the producers.
+            draft_index = layer_id - self.device_pool.layer_num
+            if not 0 <= draft_index < len(self.mtp_draft_device_pools):
+                raise ValueError(f"Invalid packed MTP indexer layer: {layer_id}")
+            return self.target_layer_num + draft_index, 0
+        host_layer_id = self.target_host_layer_mapping.get(layer_id)
+        if host_layer_id is None:
+            # L2TransferEngine still emits completion for this logical layer
+            # after the main MLA pool and every other sidecar have completed.
+            return None
+        return host_layer_id, layer_id
+
     def _backup_from_device_per_layer(
         self,
         device_pool,
@@ -298,9 +357,10 @@ class DSAIndexerPoolHost(HostKVCache):
         *,
         is_draft: bool = False,
     ):
-        # MTP draft layers do not participate in CP layer sharding.
-        host_layer_id = layer_id if is_draft else self._host_layer_index(layer_id)
-        device_layer_id = 0 if is_draft else layer_id
+        resolved = self._resolve_indexer_layer(layer_id, is_draft=is_draft)
+        if resolved is None:
+            return
+        host_layer_id, device_layer_id = resolved
 
         host_page_indices, device_page_indices = self._get_indexer_page_indices(
             host_indices, device_indices
@@ -342,6 +402,8 @@ class DSAIndexerPoolHost(HostKVCache):
     def backup_from_device_all_layer(
         self, device_pool, host_indices, device_indices, io_backend
     ):
+        if not self.layer_num:
+            return
         if self._is_device_layer_sharded(device_pool):
             for layer_id in self._owned_device_layer_ids(device_pool):
                 self._backup_from_device_per_layer(

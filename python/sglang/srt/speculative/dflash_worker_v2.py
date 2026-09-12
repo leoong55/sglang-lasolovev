@@ -1421,6 +1421,7 @@ class DFlashWorkerV2(BaseSpecWorker):
                 self.draft_model_runner.token_to_kv_pool.commit_context(
                     virtual=cache_loc[valid], requests=context_request_ids[valid],
                     positions=positions[valid], payload=payload[valid],
+                    is_decode=cache_loc_2d is not None,
                 )
                 return
 
@@ -1997,13 +1998,27 @@ class DFlashWorkerV2(BaseSpecWorker):
         seq_lens_cpu = self._draft_seq_lens_cpu_buf[:bs]
         draft_out_cache_loc = verify_out_cache_loc
         if self.use_bounded_draft_cache:
-            draft_seq_lens, draft_out_cache_loc = self.draft_model_runner.token_to_kv_pool.prepare_window(
+            bounded_pool = self.draft_model_runner.token_to_kv_pool
+            draft_seq_lens, draft_out_cache_loc = bounded_pool.prepare_window(
                 target_table=self.model_runner.req_to_token_pool.req_to_token,
                 draft_table=self.draft_model_runner.req_to_token_pool.req_to_token,
                 request_ids=batch.req_pool_indices, prefix_lens=prefix_lens,
                 block_size=block_size,
+                request_owners=batch.reqs,
             )
-            seq_lens_cpu.copy_(draft_seq_lens.to("cpu"))
+            if bounded_pool.fastpath_enabled:
+                # FA planning accepts the same monotonic host upper bound used
+                # by compact draft. Exact paged visible lengths stay on device;
+                # applying the sawtooth page alignment to an overlap upper bound
+                # on CPU could under-estimate them.
+                bounded_pool.fill_seq_lens_cpu_bound(
+                    prefix_lens_cpu=batch.seq_lens_cpu,
+                    reserved_lens_cpu=draft_input.nxt_kv_lens_cpu,
+                    visible_lens=draft_seq_lens,
+                    out=seq_lens_cpu,
+                )
+            else:
+                seq_lens_cpu.copy_(draft_seq_lens.to("cpu"))
             draft_seq_lens_sum = int(seq_lens_cpu.sum())
         elif self.use_compact_draft_cache:
             # Rebuild the draft-local sliding-window view from committed target state.

@@ -1462,6 +1462,10 @@ class Envs:
     # ===================================================================
     # DSA backend (GLM 5 and DeepSeek V3.2)
     # ===================================================================
+    # The GLM53 launcher opts into these only for its CP8/DCP4 profile.
+    # Explicit zero preserves the v9.6 path for independent A/B comparisons.
+    SGLANG_GLM53_HICACHE_INDEX_ELISION = EnvBool(False)
+    SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH = EnvBool(False)
     SGLANG_DSA_FUSE_TOPK = EnvBoolWithAlias(
         True, deprecated_name="SGLANG_NSA_FUSE_TOPK"
     )
