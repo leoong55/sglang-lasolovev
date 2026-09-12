@@ -1,5 +1,67 @@
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 
+## v9.7: producer-only HiCache index storage and bounded draft continuity
+
+Image tag: `glm53-hicache-v9.7-0bcd822377da`. Based on the complete v9.6
+stack (`640535efa1896354992191573e0f137c2fba7fa9`); CP8/DCP4, Q8 prefill,
+FP8 target KV, DFlash2/FA4 and write-through HiCache are retained.
+
+The launcher enables two independently reversible optimizations for the
+corresponding selected features. Set either environment variable to `0` to
+compare against the v9.6 behavior on the same image:
+
+| Environment variable | Default through this launcher | Effect |
+| --- | --- | --- |
+| `SGLANG_GLM53_HICACHE_INDEX_ELISION` | `1` with HiCache | Allocate and transfer only producer DSA index layers |
+| `SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH` | `1` with bounded draft window 2048 | Reuse a validated continuous-decode window mapping |
+
+Ordinary SGLang entrypoints default both variables to `0`. Explicit values
+are respected; disabling HiCache or bounded draft disables its optimization.
+These settings take effect on process restart and are printed by the launcher.
+
+HiCache retains all 78 logical layer-completion events while storing only
+the 21 GLM53 producer index layers. The GPU sizing predicate and allocator
+use the same eligibility rule; host DMA lists contain only real buffers.
+Main MLA KV and draft state keep their existing representations. The startup
+message should include `DSA indexer HiCache stores 21/78 target layers`.
+
+At the same target-KV memory budget, the calculated cost decreases from
+`78 * (656 / 4 + 132) = 23088` to `78 * 656 / 4 + 21 * 132 = 15564`
+bytes per logical token per GPU. This predicts about 2.97 million slots from
+a previous 2 million, before small auxiliary allocations/alignment and actual
+startup budgeting. It does not predict a decode speedup. The larger logical
+capacity also increases the bounded draft's CPU backing size.
+
+Bounded draft skips the full virtual-ID/version scan only for requests with
+a proven continuous accepted append after a validated window. Request owner,
+prefix tensor, protected-prefix length, request slot, prefill, retraction and
+HiCache restore/clear invalidate that proof. The fallback still validates and
+refills from CPU. Its CPU FA4 planning bound uses the pool's logical DCP page
+size; the exact device-side attention lengths are unchanged.
+
+The fast path prints `GLM53 bounded draft windows: reused=..., validated=...`.
+Durable CPU backing writes and the HiCache completion fence remain synchronous.
+This patch does not add a new FlashMLA 32-head kernel or change DCP collectives.
+GPU startup, DMA/replay correctness and end-to-end speed still require the H200
+run; CPU tests cannot certify those properties.
+
+`manifest-bounded-48.yaml` uses mem fraction 0.80, running limit 48, 16k prefill
+and decode buckets 1/2/4/8/16/32/48, matching the last supplied operator geometry.
+The launcher does not add bucket 40 or alter arguments in an existing manifest.
+
+The supplied 60k-prefix/15k-suffix/1k-output, 20-prefix, concurrency-40 baseline
+is recorded in [operator-v9.6-c40-prefix20.json](benchmarks/operator-v9.6-c40-prefix20.json):
+512.75 output tok/s, mean TPOT 66.81 ms, P95 TTFT 68.42 s, 300/300 successful.
+See [the repeatable A/B procedure](benchmarks/V9.7-VALIDATION.md).
+
+Build the cumulative overlay with `make_bundle.py`, then run `bash build.sh`
+inside the resulting bundle (`--push` also publishes the image). The build
+uses the pinned upstream base rather than overlaying an already patched image.
+`REVISION.json` records the exact source commit. All earlier chunk/DFlash/HiCache
+patches are included; experimental DeepEP patches remain outside this stack.
+
+The sections below describe earlier revisions and their original measurements.
+
 Third stage, based on the DFlash PR. Full target model
 `PhalaCloud/GLM-5.3-W4AFP8`, draft `incoai/GLM-5.3-DFlash2`,
 8xH200, TP8/EP8/CP8 interleave, DCP4 ag_rs, FP8 target KV and

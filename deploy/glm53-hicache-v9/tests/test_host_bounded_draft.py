@@ -6,11 +6,13 @@ versioning, filtering, host callbacks and selector staging code are executed.
 
 import ast
 import logging
+import gc
 import os
 import sys
 import threading
 import types
 import unittest
+import weakref
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
@@ -46,6 +48,8 @@ class BoundedDraftTest(unittest.TestCase):
         cls.ns = extract("mem_cache/glm53_bounded_draft.py", {"GLM53BoundedDraftPool", "bounded_draft_host_pool_class"}, {
             "torch": torch, "threading": threading, "logger": logging.getLogger(__name__),
             "MHATokenToKVPool": CPUMHAPool, "bounded_draft_geometry": cls.geometry,
+            "weakref": weakref,
+            "envs": NS(SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH=NS(get=lambda: False)),
         })
 
     def pool(self, logical=16384, requests=2):
@@ -255,6 +259,171 @@ class BoundedDraftTest(unittest.TestCase):
             self.assertEqual(sampler.temperatures.shape, (32,))
             self.assertEqual(pointers, [x.data_ptr() for x in (sampler.temperatures, sampler.greedy_mask, sampler.out)])
         self.assertTrue(torch.allclose(sampler.temperatures, torch.full((32,), .3)))
+
+    def owner(self, slot, prefix):
+        # Real Req instances and Tensor prefixes support weak references.
+        class Request:
+            pass
+        owner = Request()
+        owner.kv = NS(req_pool_idx=slot, cache_protected_len=len(prefix))
+        owner.prefix_indices = prefix.clone()
+        owner.is_retracted = False
+        owner.retracted_stain = False
+        return owner
+
+    def prepare_owned(self, pool, table, draft, owners, lengths):
+        return pool.prepare_window(
+            target_table=table, draft_table=draft,
+            request_ids=torch.tensor([o.kv.req_pool_idx for o in owners]),
+            prefix_lens=torch.tensor(lengths), block_size=8,
+            request_owners=owners,
+        )
+
+    def test_continuous_decode_reorders_batches_and_matches_every_ring_row(self):
+        pool = self.pool(logical=24000)
+        pool.fastpath_enabled = True
+        target = torch.zeros(3, 12000, dtype=torch.int32)
+        draft = torch.zeros_like(target)
+        owners = []
+        lengths = {1: 4096, 2: 4096}
+        for slot, base in ((1, 0), (2, 12000)):
+            ids = base + torch.arange(4096)
+            self.commit(pool, ids, slot, torch.arange(4096), self.data(4096, slot))
+            target[slot, :4096] = ids.int()
+            owners.append(self.owner(slot, ids))
+        # More than one ring rotation; accepted lengths vary and batch order
+        # changes, so validation cannot rely on fixed rows or a fixed accept_len.
+        for iteration in range(560):
+            current = owners if iteration % 2 else owners[::-1]
+            lens = [lengths[o.kv.req_pool_idx] for o in current]
+            visible, _ = self.prepare_owned(pool, target, draft, current, lens)
+            for owner, end, size in zip(current, lens, visible.tolist()):
+                slot = owner.kv.req_pool_idx
+                ids = target[slot, end - size:end].long()
+                physical = draft[slot, :size].long()
+                self.assertTrue(torch.equal(pool.k_buffer[0][physical], pool.backing[ids, 0, 0]))
+                self.assertTrue(torch.equal(pool.v_buffer[5][physical], pool.backing[ids, 5, 1]))
+            all_ids, all_pos, all_req, all_data = [], [], [], []
+            for owner in current:
+                slot = owner.kv.req_pool_idx
+                count = (1, 7, 8)[(iteration + slot) % 3]
+                pos = torch.arange(lengths[slot], lengths[slot] + count)
+                ids = pos + (0 if slot == 1 else 12000)
+                target[slot, pos] = ids.int()
+                all_ids.append(ids); all_pos.append(pos)
+                all_req.append(torch.full_like(ids, slot))
+                all_data.append(self.data(count, iteration))
+                lengths[slot] += count
+            pool.commit_context(virtual=torch.cat(all_ids), positions=torch.cat(all_pos),
+                requests=torch.cat(all_req), payload=torch.cat(all_data), is_decode=True)
+        self.assertEqual(pool.window_checks, 1)
+        self.assertEqual(pool.window_reuses, 559)
+
+    def test_continuity_rejects_repoint_slot_reuse_retraction_and_prepare_only(self):
+        pool = self.pool()
+        pool.fastpath_enabled = True
+        ids = torch.arange(4096)
+        self.commit(pool, ids, 1, ids, self.data(4096))
+        table = torch.zeros(3, 5000, dtype=torch.int32)
+        table[1, :4096] = ids.int(); table[2, :4096] = ids.int()
+        draft = torch.zeros_like(table)
+        owner = self.owner(1, ids)
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        self.assertEqual(pool.window_checks, 2)  # no accepted commit in between
+        changes = (
+            lambda: setattr(owner, "prefix_indices", owner.prefix_indices.clone()),
+            lambda: setattr(owner.kv, "cache_protected_len", 3840),
+            lambda: setattr(owner.kv, "req_pool_idx", 2),
+            lambda: setattr(owner, "retracted_stain", True),
+            lambda: setattr(owner, "is_retracted", True),
+        )
+        for change in changes:
+            pool._continuity_ready = True
+            change()
+            before = pool.window_checks
+            self.prepare_owned(pool, table, draft, [owner], [4096])
+            self.assertEqual(pool.window_checks, before + 1)
+        # A new request in the same physical slot does not inherit ownership.
+        replacement = self.owner(2, ids)
+        pool._continuity_ready = True
+        before = pool.window_checks
+        self.prepare_owned(pool, table, draft, [replacement], [4096])
+        self.assertEqual(pool.window_checks, before + 1)
+
+    def test_late_prefill_radix_repoint_reloads_different_cached_values(self):
+        pool = self.pool()
+        pool.fastpath_enabled = True
+        ids = torch.arange(4096)
+        replacement = ids + 8192
+        self.commit(pool, ids, 1, ids, self.data(4096))
+        self.commit(pool, replacement, 2, ids, self.data(4096, 23))
+        table = torch.zeros(3, 5000, dtype=torch.int32)
+        table[1, :4096] = ids.int()
+        draft = torch.zeros_like(table)
+        owner = self.owner(1, ids)
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        # Overlap may execute first decode before processing the prior prefill
+        # result. That result can repoint the radix prefix without a new forward.
+        pool._continuity_ready = True
+        table[1, :4096] = replacement.int()
+        owner.prefix_indices = replacement.clone()
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        self.assertEqual(pool.window_checks, 2)
+        self.assertTrue(torch.equal(pool.k_buffer[0][draft[1, :2048].long()],
+            self.data(4096, 23)[2048:, 0, 0]))
+
+    def test_prefill_restore_clear_and_disabled_flag_force_validation(self):
+        pool = self.pool()
+        pool.fastpath_enabled = True
+        ids = torch.arange(4096)
+        self.commit(pool, ids, 1, ids, self.data(4096))
+        table = torch.zeros(3, 5000, dtype=torch.int32); table[1, :4096] = ids.int()
+        draft = torch.zeros_like(table)
+        owner = self.owner(1, ids)
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        pool._continuity_ready = True
+        pool.restore_epoch += 1
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        self.assertEqual(pool.window_checks, 2)
+        self.commit(pool, ids, 1, ids, self.data(4096, 7))
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        self.assertEqual(pool.window_checks, 3)
+        pool._continuity_ready = True
+        pool.fastpath_enabled = False
+        self.prepare_owned(pool, table, draft, [owner], [4096])
+        self.assertEqual(pool.window_checks, 4)
+        pool.clear_bounded_cache()
+        self.assertFalse(pool._window_owners)
+        self.assertFalse(pool._continuity_ready)
+
+    def test_owner_snapshots_do_not_retain_finished_requests_or_prefixes(self):
+        pool = self.pool()
+        owner = self.owner(1, torch.arange(4096))
+        req_ref, prefix_ref = weakref.ref(owner), weakref.ref(owner.prefix_indices)
+        pool._remember_window_owners([owner], 1)
+        del owner
+        gc.collect()
+        self.assertIsNone(req_ref())
+        self.assertIsNone(prefix_ref())
+
+    def test_host_length_bound_uses_logical_page_and_is_safe_across_page_wrap(self):
+        pool = self.pool()
+        true_lens = torch.arange(1, 10000)
+        visible = true_lens - torch.clamp(true_lens - 2048, min=0) // 256 * 256
+        out = torch.empty_like(true_lens)
+        for extra in (0, 1, 7, 8, 256):
+            host = true_lens + extra
+            pool.fill_seq_lens_cpu_bound(prefix_lens_cpu=host, reserved_lens_cpu=None,
+                visible_lens=None, out=out)
+            self.assertTrue(bool((out >= visible).all()))
+            self.assertLessEqual(out.max().item(), 2303)
+            pool.fill_seq_lens_cpu_bound(prefix_lens_cpu=None, reserved_lens_cpu=host,
+                visible_lens=None, out=out)
+            self.assertTrue(bool((out >= visible).all()))
+        pool.fill_seq_lens_cpu_bound(prefix_lens_cpu=None, reserved_lens_cpu=None,
+            visible_lens=visible, out=out)
+        self.assertTrue(torch.equal(out, visible))
 
 
 if __name__ == "__main__":
