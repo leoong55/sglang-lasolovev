@@ -20,7 +20,7 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: /metrics
-        glm53-test-profile: v9.10-cp8-dcp4-cutlass
+        glm53-test-profile: v9.11.1-cp8-dcp4-cutlass
     spec:
       containers:
       - args:
@@ -158,7 +158,7 @@ spec:
           value: '0'
         - name: HUMMING_CACHE_DIR
           value: /mnt/cache/glm53-dcp4-v1/humming
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.10-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.11.1-0bcd822377da
         imagePullPolicy: IfNotPresent
         name: sglang
         ports:

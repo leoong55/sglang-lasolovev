@@ -13,6 +13,8 @@ PREVIOUS = "6526bef6bf959e203a0cc23dacdb2553f81c1e3e"
 PR_HEAD = "c6aeb8b9d9128b816777e2b64cbf6603344e8fe1"
 V98 = "2aa3716d0e9f4d55dca0e5c31dbef2b8c55a3dcf"
 V99 = "6bd52126422de3671558f3e412bba0cd57188aa8"
+V910 = "1f1171df23c98755c7d479d8befe071a9e13ecbe"
+V911 = "f8f9a644acb4c22babee1933c58092333511568b"
 
 
 def main():
@@ -50,8 +52,17 @@ def main():
     if not paths:
         parser.error("No runtime changes relative to the pinned base")
     shutil.copytree(
-        source, output, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+        source, output, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.so", "build", "cutlass.tar.gz", "*.part", "cutlass-57e3cfb*", "BUILD.json")
     )
+    # Keep the existing mixed-input mainloop and scale layout verbatim. Build
+    # only the separate launch-selector extension, not the whole sgl_kernel.
+    csrc = repo / "python/sglang/kernels/aot/csrc"
+    shutil.copytree(csrc / "cutlass_extensions", output / "cutlass/csrc/cutlass_extensions")
+    for name in ("w4a8_grouped_mm_c3x.cuh", "w4a8_get_group_starts.cuh"):
+        relative = Path("moe/cutlass_moe/w4a8") / name
+        destination = output / "cutlass/csrc" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(csrc / relative, destination)
     records = []
     added = set(
         git("diff", "--diff-filter=A", "--name-only", BASE, "--", "python/sglang")
@@ -75,7 +86,13 @@ def main():
         )
     (output / "runtime.patch").write_bytes(patch)
     (output / "v9.9-to-v9.10.patch").write_bytes(
-        git("diff", "--binary", V99, "--", "python/sglang", str(source.relative_to(repo)))
+        git("diff", "--binary", V99, V910, "--", "python/sglang", str(source.relative_to(repo)))
+    )
+    (output / "v9.10-to-v9.11.patch").write_bytes(
+        git("diff", "--binary", V910, V911, "--", "python/sglang", str(source.relative_to(repo)))
+    )
+    (output / "v9.11-to-v9.11.1.patch").write_bytes(
+        git("diff", "--binary", V911, "--", "python/sglang", str(source.relative_to(repo)))
     )
     (output / "v8-to-hicache.patch").write_bytes(
         git(
@@ -97,11 +114,16 @@ def main():
                 upstream_pr_head=PR_HEAD,
                 gpu_validated=False,
                 image_built_here=False,
-                profile="glm53-hicache-v9.10",
+                profile="glm53-hicache-v9.11.1",
+                build_fix_base_commit=V911,
+                cutlass_build_layout="one-variant-per-cu, MAX_JOBS=1",
+                cutlass_build_optional=True,
                 moe_backend_default="cutlass",
                 moe_backend_opt_in="humming",
                 humming_version="0.1.12",
                 previous_working_commit=V99,
+                previous_patch_commit=V910,
+                cutlass_tuning_default="stock until a measured config is supplied",
                 humming_ep_aware_default=True,
                 prefill_padding_max_factor=1.25,
             ),

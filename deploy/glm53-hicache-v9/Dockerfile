@@ -7,5 +7,7 @@ RUN python3 /opt/glm53-cp8-dcp4-v1/install.py \
     && python3 /opt/glm53-cp8-dcp4-v1/install.py --verify-only \
     && python3 /opt/glm53-cp8-dcp4-v1/check_humming_dependency.py \
     && python3 /opt/glm53-cp8-dcp4-v1/kernel_preflight.py
+ARG GLM53_BUILD_CUTLASS=1
+RUN GLM53_BUILD_CUTLASS="${GLM53_BUILD_CUTLASS}" python3 -u /opt/glm53-cp8-dcp4-v1/cutlass/build.py
 ENTRYPOINT ["python3", "/opt/glm53-cp8-dcp4-v1/launch.py"]
 CMD []

@@ -15,13 +15,104 @@ spec:
     metadata:
       labels:
         app: sglang-glm53-dcp4
+        runtime-sglang/metrics: 'true'
       annotations:
-        glm53-test-profile: v9.11.1-w4-component-check
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8080'
+        prometheus.io/path: /metrics
+        glm53-test-profile: v9.11.1-cp8-dcp4-cutlass-tuned
     spec:
       containers:
-      - command:
-        - sleep
-        - infinity
+      - args:
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8080'
+        - --model-path
+        - /mnt/model-pvc-w4fp8
+        - --served-model-name
+        - GLM-5.3
+        - --trust-remote-code
+        - --tp-size
+        - '8'
+        - --ep-size
+        - '8'
+        - --dp-size
+        - '1'
+        - --enable-prefill-cp
+        - --cp-strategy
+        - interleave
+        - --enable-cp-decode-attn-tp
+        - --dcp-size
+        - '4'
+        - --dcp-comm-backend
+        - ag_rs
+        - --moe-a2a-backend
+        - none
+        - --quantization
+        - w4afp8
+        - --kv-cache-dtype
+        - fp8_e4m3
+        - --dsa-prefill-backend
+        - flashmla_sparse_q8
+        - --dsa-decode-backend
+        - flashmla_kv
+        - --disable-shared-experts-fusion
+        - --page-size
+        - '64'
+        - --mem-fraction-static
+        - '0.80'
+        - --max-running-requests
+        - '48'
+        - --chunked-prefill-size
+        - '16384'
+        - --prefill-decode-interval
+        - '1'
+        - --cuda-graph-backend-prefill
+        - breakable
+        - --cuda-graph-max-bs-prefill
+        - '16384'
+        - --cuda-graph-bs-prefill
+        - '8192'
+        - '16384'
+        - --cuda-graph-backend-decode
+        - full
+        - --cuda-graph-max-bs-decode
+        - '48'
+        - --cuda-graph-bs-decode
+        - '1'
+        - '2'
+        - '4'
+        - '8'
+        - '16'
+        - '32'
+        - '40'
+        - '48'
+        - --enable-hierarchical-cache
+        - --hicache-write-policy
+        - write_through
+        - --hicache-io-backend
+        - direct
+        - --hicache-mem-layout
+        - layer_first
+        - --hicache-host-memory-mode
+        - cache
+        - --hicache-ratio
+        - '1.0'
+        - --reasoning-parser
+        - glm45
+        - --tool-call-parser
+        - glm47
+        - --enable-metrics
+        - --enable-cache-report
+        - --glm53-cp-decode-fusion
+        - 'off'
+        - --enforce-disable-flashinfer-allreduce-fusion
+        - --moe-runner-backend
+        - cutlass
+        command:
+        - python3
+        - /opt/glm53-cp8-dcp4-v1/launch.py
         env:
         - name: CUDA_DISABLE_CONTROL
           value: 'true'
@@ -67,6 +158,8 @@ spec:
           value: '0'
         - name: HUMMING_CACHE_DIR
           value: /mnt/cache/glm53-dcp4-v1/humming
+        - name: SGLANG_GLM53_CUTLASS_CONFIG
+          value: /mnt/cache/glm53-cutlass-tuning.json
         image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.11.1-0bcd822377da
         imagePullPolicy: IfNotPresent
         name: sglang
@@ -74,6 +167,15 @@ spec:
         - containerPort: 8080
           name: http
           protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
         resources:
           limits:
             cpu: '112'
@@ -83,6 +185,15 @@ spec:
             cpu: '112'
             memory: 1536Gi
             nvidia.com/gpu: '8'
+        startupProbe:
+          failureThreshold: 720
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
