@@ -4,11 +4,10 @@ import hashlib
 import importlib.util
 import io
 import json
-from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
-
+from pathlib import Path
+from types import SimpleNamespace
 
 BUNDLE = Path(__file__).resolve().parents[1]
 REPO = BUNDLE.parents[1]
@@ -35,7 +34,10 @@ class LauncherTests(unittest.TestCase):
         for profile, expected in launch.PROFILES.items():
             with self.subTest(profile=profile):
                 command, env = launch.make_launch(profile, "/models/full", environ={})
-                self.assertEqual(int(value(command, "--tp-size")) * int(value(command, "--pp-size")), 8)
+                self.assertEqual(
+                    int(value(command, "--tp-size")) * int(value(command, "--pp-size")),
+                    8,
+                )
                 self.assertEqual(value(command, "--ep-size"), str(expected["ep"]))
                 self.assertEqual(value(command, "--dcp-size"), "1")
                 self.assertEqual(value(command, "--attn-cp-size"), "1")
@@ -52,7 +54,9 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(graphs["prefill"]["backend"], "disabled")
                 self.assertEqual(graphs["decode"]["backend"], "full")
                 local_limit = 24 if profile == "pp2" else 48 // expected["dp"]
-                self.assertEqual(graphs["decode"]["bs"], list(range(1, local_limit + 1)))
+                self.assertEqual(
+                    graphs["decode"]["bs"], list(range(1, local_limit + 1))
+                )
                 if profile == "pp2":
                     self.assertNotIn("--enable-dp-attention", command)
                     self.assertEqual(env["SGLANG_PP_LAYER_PARTITION"], "39,39")
@@ -61,12 +65,16 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual(env["GLM53_PP_OBSERVER"], "1")
                 else:
                     self.assertIn("--enable-dp-attention", command)
-                    self.assertEqual(value(command, "--load-balance-method"), "round_robin")
+                    self.assertEqual(
+                        value(command, "--load-balance-method"), "round_robin"
+                    )
                     self.assertNotIn("SGLANG_PP_LAYER_PARTITION", env)
 
     def test_hicache_is_explicit_and_has_no_storage_backend(self):
         for profile in launch.PROFILES:
-            command, _ = launch.make_launch(profile, "/models/full", hicache=True, environ={})
+            command, _ = launch.make_launch(
+                profile, "/models/full", hicache=True, environ={}
+            )
             self.assertEqual(value(command, "--hicache-size"), "32")
             self.assertEqual(value(command, "--hicache-write-policy"), "write_through")
             self.assertEqual(value(command, "--hicache-io-backend"), "direct")
@@ -74,26 +82,73 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn("--hicache-storage-backend", command)
 
     def test_inherited_experiment_overrides_are_rejected(self):
-        for key in ["SGLANG_CP_FUSION", "SGLANG_DCP_MODE", "SGLANG_ENABLE_CP_V2", "SGLANG_DFLASH_BLOCK_SIZE", "SGLANG_SPECULATIVE_ALGORITHM", "SGLANG_PP_LAYER_PARTITION", "SGLANG_PP_FULL_NEED", "SGLANG_HICACHE_RATIO", "SGLANG_EXTRA_ARGS", "SGLANG_ENABLE_DEEPEP"]:
+        for key in [
+            "SGLANG_CP_FUSION",
+            "SGLANG_DCP_MODE",
+            "SGLANG_ENABLE_CP_V2",
+            "SGLANG_DFLASH_BLOCK_SIZE",
+            "SGLANG_SPECULATIVE_ALGORITHM",
+            "SGLANG_PP_LAYER_PARTITION",
+            "SGLANG_PP_FULL_NEED",
+            "SGLANG_HICACHE_RATIO",
+            "SGLANG_EXTRA_ARGS",
+            "SGLANG_ENABLE_DEEPEP",
+        ]:
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Inherited"):
                 launch.make_launch("pp2", "/models/full", environ={key: "0"})
-        _, env = launch.make_launch("pp2", "/models/full", environ={"NCCL_DEBUG": "WARN", "SGLANG_SET_CPU_AFFINITY": "0"})
+        _, env = launch.make_launch(
+            "pp2",
+            "/models/full",
+            environ={"NCCL_DEBUG": "WARN", "SGLANG_SET_CPU_AFFINITY": "0"},
+        )
         self.assertEqual(env["NCCL_DEBUG"], "WARN")
 
     def test_no_unrecognized_options_against_pinned_server_args(self):
         tree = ast.parse((REPO / "python/sglang/srt/server_args.py").read_text())
-        flags = {"--" + n.target.id.replace("_", "-") for n in ast.walk(tree) if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)}
-        flags.update(n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.startswith("--") and " " not in n.value)
+        flags = {
+            "--" + n.target.id.replace("_", "-")
+            for n in ast.walk(tree)
+            if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+        }
+        flags.update(
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant)
+            and isinstance(n.value, str)
+            and n.value.startswith("--")
+            and " " not in n.value
+        )
         for profile in launch.PROFILES:
-            command, _ = launch.make_launch(profile, "/models/full", hicache=True, environ={})
-            self.assertEqual([option for option in command if option.startswith("--") and option not in flags], [])
+            command, _ = launch.make_launch(
+                profile, "/models/full", hicache=True, environ={}
+            )
+            self.assertEqual(
+                [
+                    option
+                    for option in command
+                    if option.startswith("--") and option not in flags
+                ],
+                [],
+            )
 
     def test_model_geometry_is_checked_before_allocating_gpu_memory(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
-            path.write_text(json.dumps({"architectures": ["GlmMoeDsaForCausalLM"], "num_hidden_layers": 78, "quantization_config": {"quant_method": "w4afp8"}}))
+            path.write_text(
+                json.dumps(
+                    {
+                        "architectures": ["GlmMoeDsaForCausalLM"],
+                        "num_hidden_layers": 78,
+                        "quantization_config": {"quant_method": "w4afp8"},
+                    }
+                )
+            )
             launch.validate_model(directory)
-            path.write_text(json.dumps({"architectures": ["GlmMoeDsaForCausalLM"], "num_hidden_layers": 45}))
+            path.write_text(
+                json.dumps(
+                    {"architectures": ["GlmMoeDsaForCausalLM"], "num_hidden_layers": 45}
+                )
+            )
             with self.assertRaisesRegex(ValueError, "78 layers"):
                 launch.validate_model(directory)
 
@@ -103,10 +158,17 @@ class SourceVerificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "no baked"):
                 launch.validate_revision(directory, environ={"SOURCE_COMMIT": "a" * 40})
-            self.assertIsNone(launch.validate_revision(directory, environ={}, required=False))
+            self.assertIsNone(
+                launch.validate_revision(directory, environ={}, required=False)
+            )
             path = Path(directory) / "image-revision"
             path.write_text("a" * 40 + "\n")
-            self.assertEqual(launch.validate_revision(directory, environ={"SOURCE_COMMIT": "a" * 40}), "a" * 40)
+            self.assertEqual(
+                launch.validate_revision(
+                    directory, environ={"SOURCE_COMMIT": "a" * 40}
+                ),
+                "a" * 40,
+            )
             with self.assertRaisesRegex(ValueError, "SOURCE_COMMIT must"):
                 launch.validate_revision(directory, environ={})
             with self.assertRaisesRegex(ValueError, "mismatch"):
@@ -125,7 +187,16 @@ class SourceVerificationTests(unittest.TestCase):
             root = Path(directory)
             source = root / "runtime.py"
             source.write_bytes(b"pinned\n")
-            manifest = {"base_commit": "pinned", "files": [{"path": "runtime.py", "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}], "forbidden_paths": ["unexpected.py"]}
+            manifest = {
+                "base_commit": "pinned",
+                "files": [
+                    {
+                        "path": "runtime.py",
+                        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                    }
+                ],
+                "forbidden_paths": ["unexpected.py"],
+            }
             (root / "manifest.json").write_text(json.dumps(manifest))
             with contextlib.redirect_stdout(io.StringIO()):
                 installer.verify(root, root)
@@ -142,15 +213,29 @@ class SourceVerificationTests(unittest.TestCase):
 class ObserverTests(unittest.TestCase):
     def test_pp_union_deduplicates_and_excludes_waiting_finished_and_retracted(self):
         def req(rid, finished=None, retracted=False, output_length=4):
-            return SimpleNamespace(rid=rid, finished_reason=finished, is_retracted=retracted, output_ids=[1] * output_length)
+            return SimpleNamespace(
+                rid=rid,
+                finished_reason=finished,
+                is_retracted=retracted,
+                output_ids=[1] * output_length,
+            )
+
         a, b, c = req("a"), req("b"), req("c")
-        done, waiting, retracted = req("done", "length"), req("waiting"), req("retracted", retracted=True)
+        done, waiting, retracted = (
+            req("done", "length"),
+            req("waiting"),
+            req("retracted", retracted=True),
+        )
+
         def batch(*reqs):
             return SimpleNamespace(reqs=list(reqs))
+
         scheduler = SimpleNamespace(
             running_mbs=[batch(a, done), batch(b, waiting, retracted)],
-            running_batch=batch(a), mbs=[batch(a, c), None],
-            waiting_queue=[waiting], chunked_req=c,
+            running_batch=batch(a),
+            mbs=[batch(a, c), None],
+            waiting_queue=[waiting],
+            chunked_req=c,
         )
         observed = observe.snapshot(scheduler)
         self.assertEqual(observed["rids"], ["a", "b", "c"])

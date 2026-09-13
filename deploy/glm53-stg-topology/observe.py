@@ -16,7 +16,6 @@ import threading
 import time
 import weakref
 
-
 PREFIX = "GLM53_PP_ACTIVITY "
 TARGET = "sglang.srt.managers.scheduler"
 
@@ -28,8 +27,10 @@ def snapshot(scheduler):
 
     def live(req):
         return (
-            req is not None and req.finished_reason is None
-            and not req.is_retracted and req.rid not in queued
+            req is not None
+            and req.finished_reason is None
+            and not req.is_retracted
+            and req.rid not in queued
         )
 
     requests = {}
@@ -57,11 +58,19 @@ def snapshot(scheduler):
     chunked_ids = {req.rid for req in chunks if remember(req)}
     all_ids = running | inflight | chunked_ids
     return {
-        "timestamp": time.time(), "rids": sorted(all_ids), "count": len(all_ids),
-        "stage": 0, "tp": 0, "valid": True,
-        "running_count": len(running), "inflight_count": len(inflight),
-        "chunked_rids": sorted(chunked_ids), "queued_count": len(queued),
-        "output_lengths": {rid: len(requests[rid].output_ids) for rid in sorted(all_ids)},
+        "timestamp": time.time(),
+        "rids": sorted(all_ids),
+        "count": len(all_ids),
+        "stage": 0,
+        "tp": 0,
+        "valid": True,
+        "running_count": len(running),
+        "inflight_count": len(inflight),
+        "chunked_rids": sorted(chunked_ids),
+        "queued_count": len(queued),
+        "output_lengths": {
+            rid: len(requests[rid].output_ids) for rid in sorted(all_ids)
+        },
         "scope": "union_of_live_pp_microbatches",
     }
 
@@ -76,8 +85,11 @@ def _sample(reference):
             record = snapshot(scheduler)
         except Exception as exc:
             record = {
-                "timestamp": time.time(), "stage": 0, "tp": 0,
-                "valid": False, "error": f"{type(exc).__name__}: {exc}",
+                "timestamp": time.time(),
+                "stage": 0,
+                "tp": 0,
+                "valid": False,
+                "error": f"{type(exc).__name__}: {exc}",
             }
         try:
             # One write prevents the observer from fragmenting its own JSON line.
@@ -98,7 +110,9 @@ def wrap_scheduler(cls):
         original(self, *args, **kwargs)
         if self.ps.pp_size > 1 and self.ps.pp_rank == 0 and self.ps.tp_rank == 0:
             threading.Thread(
-                target=_sample, args=(weakref.ref(self),), daemon=True,
+                target=_sample,
+                args=(weakref.ref(self),),
+                daemon=True,
                 name="glm53-pp-observer",
             ).start()
 
