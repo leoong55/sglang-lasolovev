@@ -4,6 +4,15 @@ The frozen runtime is not imported or modified. Completion and concurrency claim
 are reconstructed independently from its artifacts. Public output uses an explicit
 schema; paths, URLs, IDs, prompts, errors, and arbitrary metric keys never pass
 through. Raw artifacts remain under the supplied local campaign directories.
+
+Schema 4 separates server-observed C40 from occupancy duration and decode
+progress. The accepted workload requires observed server concurrency, not a
+30-second cohort of unchanged requests. Selection therefore requires a valid
+server observation of at least 40 active requests, alongside independent
+functional and experiment-identity checks. Thirty-second sampled occupancy and
+the stronger retained-ID progress checks remain diagnostics. Request turnover
+does not invalidate an occupancy observation; it limits what progress can be
+observed between snapshots. No interpolation proves concurrency between samples.
 """
 
 from __future__ import annotations
@@ -14,6 +23,7 @@ import math
 import re
 import statistics
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 
 PROFILES = {"pp2", "dpa2", "dpa4", "dpa8"}
@@ -91,6 +101,199 @@ def source_identity(state):
         "image_digest": (
             digest if re.fullmatch(r"sha256:[0-9a-f]{64}", digest) else None
         ),
+        "tooling_commit": safe_hash(state.get("tooling_commit"), 40),
+        "configmap_sha256": safe_hash(state.get("configmap_sha256"), 64),
+    }
+
+
+def safe_hash(value, length):
+    if not isinstance(value, str):
+        return None
+    if length == 64:
+        value = value.removeprefix("sha256:")
+    return value if re.fullmatch(f"[0-9a-f]{{{length}}}", value) else None
+
+
+def workload_identity(state, provenance):
+    expected = source_identity(state)
+    observed = source_identity(
+        provenance | {"image": provenance.get("serving_image_digest")}
+    )
+    problems = [
+        (
+            "missing_"
+            if expected[key] is None or observed[key] is None
+            else "mismatched_"
+        )
+        + key
+        for key in expected
+        if expected[key] is None
+        or observed[key] is None
+        or expected[key] != observed[key]
+    ]
+    return expected, problems
+
+
+def workload_provenance(verdict_file, result_root):
+    """Use the closest explicit declaration; directory names carry no purpose."""
+    for directory in (verdict_file.parent, *verdict_file.parent.parents):
+        path = directory / "provenance.json"
+        if path.is_file():
+            return read_json(path)
+        if directory == result_root:
+            break
+    return {}
+
+
+def declaration_timing(declared_at, first_request_at):
+    if not number(declared_at) or not number(first_request_at):
+        return "not_observable"
+    return "before_workloads" if declared_at <= first_request_at else "after_workloads"
+
+
+def measurement_provenance_verified(row):
+    return (
+        row["purpose"] == "measurement"
+        and row["purpose_declaration_timing"] == "before_workloads"
+        and row["experiment_identity_verified"]
+    )
+
+
+def measurement_eligible(row):
+    return (
+        measurement_provenance_verified(row)
+        and row["compile_preparation"]["comparison_qualified"]
+    )
+
+
+COMPILE_MARKERS = {
+    "deepgemm_session": "Entering DeepGEMM JIT Pre-Compile session",
+    "deepgemm_compile_attempt": "Try DeepGEMM JIT Compiling for",
+    "deepgemm_warmup": "DeepGEMM warmup",
+    "deepgemm_memory_check": "Required memory for warmup:",
+    "deepgemm_warmup_reduced": "reducing max_m",
+}
+
+
+def compile_inventory(path):
+    snapshot = read_json(path)
+    if (
+        snapshot.get("observable") is not True
+        or snapshot.get("status") != "observed"
+        or snapshot.get("errors") != []
+        or not isinstance(snapshot.get("files"), list)
+        or not number(snapshot.get("started_at"))
+        or not number(snapshot.get("finished_at"))
+        or snapshot["started_at"] > snapshot["finished_at"]
+    ):
+        return None, snapshot
+    files = {}
+    for item in snapshot["files"]:
+        if not isinstance(item, dict):
+            return None, snapshot
+        name = item.get("path")
+        if (
+            not isinstance(name, str)
+            or not name
+            or name.startswith("/")
+            or ".." in name.split("/")
+            or name.split("/")[0]
+            not in {"deepgemm", "triton", "inductor", "torch-extensions", "cuda"}
+            or not count(item.get("size"))
+            or not count(item.get("mtime_ns"))
+            or name in files
+        ):
+            return None, snapshot
+        files[name] = (item["size"], item["mtime_ns"])
+    return files, snapshot
+
+
+def compile_preparation_evidence(directory, log, begin, end):
+    before, before_meta = compile_inventory(directory / "before-compile-cache.json")
+    after, after_meta = compile_inventory(directory / "after-compile-cache.json")
+    window = number(begin) and number(end) and begin <= end
+    inventories_observed = (
+        before is not None
+        and after is not None
+        and window
+        and before_meta["finished_at"] <= begin
+        and after_meta["started_at"] >= end
+    )
+    changes = None
+    if inventories_observed:
+        added, removed = set(after) - set(before), set(before) - set(after)
+        modified = {
+            name for name in set(before) & set(after) if before[name] != after[name]
+        }
+        timed = Counter()
+        for name in added | modified:
+            timestamp = after[name][1] / 1e9
+            timed[
+                (
+                    "before_measurement"
+                    if timestamp < begin
+                    else (
+                        "during_measurement"
+                        if timestamp <= end
+                        else "after_measurement"
+                    )
+                )
+            ] += 1
+        changes = {
+            "added": len(added),
+            "modified": len(modified),
+            "removed": len(removed),
+            "total": len(added) + len(modified) + len(removed),
+            "mtime_classification": dict(timed),
+            "removed_artifact_time_not_observable": len(removed),
+        }
+    markers, unattributed = Counter(), 0
+    timestamped_lines = 0
+    # Preserve tqdm carriage-return fragments inside their timestamped CRI line.
+    for line in log.split("\n"):
+        token = line.split(maxsplit=1)[0] if line.strip() else ""
+        try:
+            date = datetime.fromisoformat(token.replace("Z", "+00:00"))
+            timestamp = date.timestamp() if date.tzinfo is not None else None
+        except (ValueError, OverflowError):
+            timestamp = None
+        timestamped_lines += timestamp is not None
+        found = [key for key, text in COMPILE_MARKERS.items() if text in line]
+        if not found:
+            continue
+        if timestamp is None or not window:
+            unattributed += 1
+        elif begin <= timestamp <= end:
+            markers.update(found)
+    marker_observed = bool(timestamped_lines and window)
+    preparation = bool((changes and changes["total"]) or markers)
+    qualified = bool(
+        inventories_observed
+        and marker_observed
+        and not preparation
+        and not unattributed
+    )
+    reasons = []
+    if not inventories_observed:
+        reasons.append("compile_inventory_not_observable_or_window_unverified")
+    if not marker_observed or unattributed:
+        reasons.append("compile_marker_window_not_observable")
+    if changes and changes["total"]:
+        reasons.append("compiler_artifacts_changed_during_child_attempt")
+    if markers:
+        reasons.append("warmup_markers_in_measured_window")
+    return {
+        "inventory_status": "observed" if inventories_observed else "not_observable",
+        "artifact_changes": changes,
+        "marker_status": (
+            "observed" if marker_observed and not unattributed else "not_observable"
+        ),
+        "in_window_markers": dict(markers),
+        "unattributed_marker_lines": unattributed,
+        "preparation_evidence": preparation,
+        "comparison_qualified": qualified,
+        "qualification_issues": reasons,
+        "scope": "Inventory brackets the child including untimed warmup; artifact writes are not a compile-time counter. Any change conservatively excludes this attempt under the predefined preparation rule. Unchanged metadata and absent markers do not prove zero JIT.",
     }
 
 
@@ -122,7 +325,12 @@ def longest_window(samples):
     return longest
 
 
-def pp_evidence(log, begin, end):
+def pp_evidence(log, begin, end, allowed_rids=None, diagnostics=None):
+    """Count measured response IDs only when an allowlist is supplied.
+
+    Without an allowlist this is a health-filtered diagnostic, never sufficient
+    for a qualified workload verdict. summarize_workload always supplies one.
+    """
     rows = {}
     for line in log.splitlines():
         if "GLM53_PP_ACTIVITY " not in line:
@@ -147,18 +355,25 @@ def pp_evidence(log, begin, end):
             and isinstance(rids, list)
             and all(isinstance(rid, str) for rid in rids)
         )
-        ids = set(rids) if valid else set()
+        ids = (
+            {rid for rid in rids if not rid.startswith("HEALTH_CHECK")}
+            if valid
+            else set()
+        )
+        if allowed_rids is not None:
+            ids.intersection_update(allowed_rids)
         lengths = row.get("output_lengths", {})
         lengths_valid = (
             isinstance(lengths, dict)
-            and set(lengths) == ids
-            and all(count(value) for value in lengths.values())
+            and ids <= set(lengths)
+            and all(count(lengths[rid]) for rid in ids)
         )
+        measured_lengths = {rid: lengths[rid] for rid in ids} if lengths_valid else None
         item = {
             "timestamp": timestamp,
             "count": len(ids) if valid else None,
             "ids": ids,
-            "lengths": lengths if valid and lengths_valid else None,
+            "lengths": measured_lengths if valid else None,
         }
         # Conflicting duplicate timestamps indicate ambiguous observations, not
         # an opportunity to choose the more favorable sample.
@@ -175,24 +390,69 @@ def pp_evidence(log, begin, end):
     progress_windows = 0
     longest_progress = 0.0
     current_progress = 0.0
+    adjacent = c40_adjacent = churn = c40_churn = 0
+    progress_evaluable = progressing = 0
+    retained, entered, exited, advancing_counts, token_increments = [], [], [], [], []
     for left, right in zip(records, records[1:]):
         delta = right["timestamp"] - left["timestamp"]
         advancing = 0
-        if (
+        valid_pair = (
             0 < delta <= MAX_GAP
-            and left["lengths"] is not None
-            and right["lengths"] is not None
-        ):
-            advancing = sum(
-                right["lengths"][rid] > left["lengths"][rid]
-                for rid in left["ids"] & right["ids"]
-            )
+            and left["count"] is not None
+            and right["count"] is not None
+        )
+        if valid_pair:
+            adjacent += 1
+            common = left["ids"] & right["ids"]
+            entering = len(right["ids"] - left["ids"])
+            leaving = len(left["ids"] - right["ids"])
+            retained.append(len(common))
+            entered.append(entering)
+            exited.append(leaving)
+            changed = bool(entering or leaving)
+            churn += changed
+            both_c40 = left["count"] >= 40 and right["count"] >= 40
+            c40_adjacent += both_c40
+            c40_churn += both_c40 and changed
+            if common and left["lengths"] is not None and right["lengths"] is not None:
+                increments = [
+                    right["lengths"][rid] - left["lengths"][rid] for rid in common
+                ]
+                # A decreasing counter is ambiguous. Missing/new IDs do not
+                # prove progress; only retained IDs with valid counters can.
+                if all(value >= 0 for value in increments):
+                    progress_evaluable += 1
+                    advancing = sum(value > 0 for value in increments)
+                    progressing += advancing > 0
+                    advancing_counts.append(advancing)
+                    token_increments.append(sum(increments))
         if advancing >= 40:
             progress_windows += 1
             current_progress += delta
             longest_progress = max(longest_progress, current_progress)
         else:
             current_progress = 0.0
+    if diagnostics is not None:
+        diagnostics.update(
+            valid_adjacent_windows=adjacent,
+            adjacent_windows_with_c40_at_both_samples=c40_adjacent,
+            windows_with_active_membership_change=churn,
+            c40_windows_with_active_membership_change=c40_churn,
+            common_active_requests=distribution(retained),
+            entering_active_requests=distribution(entered),
+            leaving_active_requests=distribution(exited),
+            progress_evaluable_windows=progress_evaluable,
+            windows_with_observed_decode_progress=progressing,
+            advancing_common_requests=distribution(advancing_counts),
+            observed_generated_token_increments=sum(token_increments),
+            decode_progress_status=(
+                "observed"
+                if progressing
+                else "not_observed" if progress_evaluable else "not_observable"
+            ),
+            membership_scope="Entering/leaving the observed active set; not inferred completions or queue admissions.",
+            progress_scope="Token increments only for retained IDs in adjacent valid snapshots; complete turnover leaves progress unobservable.",
+        )
     return points, progress_windows, longest_progress
 
 
@@ -290,6 +550,18 @@ def completion_evidence(path, verdict, workload):
     complete_ids = all(
         isinstance(value, str) and value for value in identifiers
     ) and len(set(identifiers)) == len(identifiers)
+    response_identifiers = [record.get("response_id") for record in measured]
+    allowed_rids = {
+        value
+        for value in response_identifiers
+        if isinstance(value, str) and value and not value.startswith("HEALTH_CHECK")
+    }
+    response_ids_complete = (
+        len(measured) == expected
+        and len(allowed_rids) == expected
+        and complete_ids
+        and malformed == 0
+    )
     invalid = 0
     finishes, tokens, cache = Counter(), Counter(), Counter()
     for record in measured:
@@ -418,6 +690,8 @@ def completion_evidence(path, verdict, workload):
         "_begin": begin,
         "_end": end,
         "_dataset": fingerprint,
+        "_pp_allowed_rids": allowed_rids,
+        "_pp_response_ids_complete": response_ids_complete,
     }
 
 
@@ -544,6 +818,7 @@ def request_affinity(path, log, profile, workload, catalog):
         defaultdict(Counter),
         defaultdict(list),
     )
+    rank_sources = Counter()
     response_ids, request_ids, sample_indices = set(), set(), set()
     joined = ranked = cached = matched = catalog_verified_requests = (
         duplicate_events
@@ -584,10 +859,17 @@ def request_affinity(path, log, profile, workload, catalog):
             continue
         joined += 1
         rank = native["dp_rank"]
+        rank_source = "native metadata"
+        if rank is None and profile == "pp2":
+            # PP2 has one DP group; the pinned native logger legitimately emits
+            # dp_rank=None. This is explicit topology inference, not a fallback
+            # for missing ranks on data-parallel profiles.
+            rank, rank_source = 0, "single-DP topology"
         if not count(rank) or rank >= size:
             issues["missing_or_invalid_native_dp_rank"] += 1
             continue
         ranked += 1
+        rank_sources[rank_source] += 1
         per_dp[rank] += 1
         value = native["cached_tokens"]
         if count(value):
@@ -632,6 +914,7 @@ def request_affinity(path, log, profile, workload, catalog):
     scope = "DP groups that processed a prefix during this run; not simultaneous cache residency."
     result = {
         "native_request_dp_status": "observed" if complete else "not_observable",
+        "dp_rank_sources": dict(rank_sources),
         "native_cached_tokens_status": (
             "observed" if complete and cached == expected else "not_observable"
         ),
@@ -679,7 +962,7 @@ def request_affinity(path, log, profile, workload, catalog):
     return result, dict(cache_values)
 
 
-def summarize_workload(state, verdict_file, log, catalog):
+def summarize_workload(state, verdict_file, log, catalog, provenance=None):
     verdict = read_json(verdict_file)
     match = re.fullmatch(
         r"r(\d+)-(short|long-cold|long-warm)", verdict_file.parent.name
@@ -687,6 +970,14 @@ def summarize_workload(state, verdict_file, log, catalog):
     if not match or verdict.get("workload") != match[2]:
         return None
     workload = match[2]
+    provenance = provenance or {}
+    identity, identity_issues = workload_identity(state, provenance)
+    purpose = provenance.get("purpose")
+    purpose = (
+        purpose
+        if isinstance(purpose, str) and purpose in {"measurement", "preparation"}
+        else "unspecified"
+    )
     row = completion_evidence(verdict_file.parent / "requests.jsonl", verdict, workload)
     raw = read_json(verdict_file.parent / "vllm.json")
     expected = row["expected_requests"]
@@ -698,11 +989,15 @@ def summarize_workload(state, verdict_file, log, catalog):
         for key in ("cleanup_error", "export_error", "final_collection_error")
     )
     begin, end = row["_begin"], row["_end"]
+    compilation = compile_preparation_evidence(verdict_file.parent, log, begin, end)
     points, progress_windows, progress_seconds = [], None, None
+    pp_observation = {} if state["profile"] == "pp2" else None
     dpa_observation = None
     if begin is not None and end is not None and row["timestamps_valid"]:
         if state["profile"] == "pp2":
-            points, progress_windows, progress_seconds = pp_evidence(log, begin, end)
+            points, progress_windows, progress_seconds = pp_evidence(
+                log, begin, end, row["_pp_allowed_rids"], diagnostics=pp_observation
+            )
         else:
             points, dpa_observation = dpa_evidence(
                 verdict_file.parent / "telemetry.jsonl", begin, end, state["profile"]
@@ -714,6 +1009,9 @@ def summarize_workload(state, verdict_file, log, catalog):
             )
     valid_points = [value for _, value in points if number(value)]
     sustained = longest_window(points)
+    identity_complete = state["profile"] != "pp2" or row["_pp_response_ids_complete"]
+    c40_samples = sum(value >= 40 for value in valid_points)
+    observed_c40 = bool(c40_samples and identity_complete)
     affinity, affinity_cache_values = request_affinity(
         verdict_file.parent / "requests.jsonl", log, state["profile"], workload, catalog
     )
@@ -724,22 +1022,47 @@ def summarize_workload(state, verdict_file, log, catalog):
             "cache_mode": "hicache" if state["phase"] == "hicache" else "baseline",
             "workload": workload,
             "repetition": int(match[1]),
-            **source_identity(state),
+            **identity,
+            "purpose": purpose,
+            "purpose_declaration_timing": declaration_timing(
+                provenance.get("timestamp"), begin
+            ),
+            "experiment_identity_verified": not identity_issues,
+            "experiment_identity_issues": identity_issues,
+            "preparation_skipped": state.get("preparation_skipped") is True,
+            "compile_preparation": compilation,
             "server_running_peak": max(valid_points, default=None),
             "server_samples": len(valid_points),
             "invalid_server_samples": len(points) - len(valid_points),
+            "server_c40_observed": observed_c40,
+            "server_samples_running_at_least_40": c40_samples,
+            "server_c40_sample_fraction": (
+                c40_samples / len(valid_points) if valid_points else None
+            ),
             "c40_longest_seconds": sustained,
-            "c40_sustained_30s": sustained >= SUSTAINED_SECONDS,
+            "c40_sustained_30s": sustained >= SUSTAINED_SECONDS and identity_complete,
             "pp_windows_40_advancing": progress_windows,
             "pp_progress_longest_seconds": progress_seconds,
+            "pp_turnover_and_progress": pp_observation,
             "pp_progress_sustained_30s": (
-                progress_seconds >= SUSTAINED_SECONDS
+                progress_seconds >= SUSTAINED_SECONDS and identity_complete
                 if progress_seconds is not None
                 else None
             ),
+            "pp_measurement_identity": (
+                {
+                    "status": "verified" if identity_complete else "not_observable",
+                    "expected_response_ids": expected,
+                    "unique_measured_response_ids": len(row["_pp_allowed_rids"]),
+                    "scope": "Measured recorder response IDs only; health, warmup and foreign requests excluded.",
+                }
+                if state["profile"] == "pp2"
+                else None
+            ),
             "dpa_snapshot_observation": dpa_observation,
-            "capacity_qualified": sustained >= SUSTAINED_SECONDS
-            and (state["profile"] != "pp2" or progress_seconds >= SUSTAINED_SECONDS),
+            # Compatibility field: server occupancy evidence only. Functional
+            # validity and comparable identities remain separate selection gates.
+            "capacity_qualified": observed_c40,
             "metrics": safe_metrics(raw),
             "_node": state.get("node") if isinstance(state.get("node"), str) else None,
             "_campaign_run_id": state["run_id"],
@@ -758,7 +1081,11 @@ def summarize_workload(state, verdict_file, log, catalog):
 
 def affinity_aggregate(group):
     valid = [
-        row for row in group if row["functional_valid"] and row["orchestration_valid"]
+        row
+        for row in group
+        if row["functional_valid"]
+        and row["orchestration_valid"]
+        and measurement_eligible(row)
     ]
     native = [
         row
@@ -775,6 +1102,9 @@ def affinity_aggregate(group):
         for row in valid
         if row["request_affinity"]["native_cached_tokens_status"] == "observed"
     ]
+    rank_sources = Counter()
+    for row in valid:
+        rank_sources.update(row["request_affinity"]["dp_rank_sources"])
     size = 1 if group[0]["profile"] == "pp2" else int(group[0]["profile"][3:])
     per_dp = []
     for rank in range(size):
@@ -815,6 +1145,7 @@ def affinity_aggregate(group):
             prefix_stats[str(label)] = distribution(counts)
     return {
         "native_request_dp_observed_repetitions": len(native),
+        "dp_rank_sources": dict(rank_sources),
         "native_cached_tokens_observed_repetitions": len(cached),
         "prefix_affinity_observed_repetitions": len(prefixes),
         "all_native_request_dp_observed": len(native) == len(group),
@@ -837,6 +1168,8 @@ def prefix_placement_comparisons(rows):
                 row["repetition"],
                 row["source_commit"],
                 row["image_digest"],
+                row["tooling_commit"],
+                row["configmap_sha256"],
             )
             pairs[key][row["workload"]] = row
     comparisons = []
@@ -848,12 +1181,15 @@ def prefix_placement_comparisons(rows):
             "repetition": key[3],
             "source_commit": key[4],
             "image_digest": key[5],
+            "tooling_commit": key[6],
+            "configmap_sha256": key[7],
             "status": "not_observable",
         }
         if all(
             row
             and row["functional_valid"]
             and row["orchestration_valid"]
+            and measurement_eligible(row)
             and row["request_affinity"]["prefix_affinity_status"] == "observed"
             for row in (cold, warm)
         ):
@@ -901,6 +1237,8 @@ def aggregate(rows):
             row["workload"],
             row["source_commit"],
             row["image_digest"],
+            row["tooling_commit"],
+            row["configmap_sha256"],
         )
         grouped[key].append(row)
     result = []
@@ -908,7 +1246,9 @@ def aggregate(rows):
         valid = [
             row
             for row in group
-            if row["functional_valid"] and row["orchestration_valid"]
+            if row["functional_valid"]
+            and row["orchestration_valid"]
+            and measurement_eligible(row)
         ]
         stats = {}
         for name in set().union(*(row["metrics"] for row in valid)):
@@ -927,11 +1267,29 @@ def aggregate(rows):
                 "workload": key[2],
                 "source_commit": key[3],
                 "image_digest": key[4],
+                "tooling_commit": key[5],
+                "configmap_sha256": key[6],
+                "all_measurement_identities_verified": all(
+                    measurement_provenance_verified(row) for row in group
+                ),
+                "all_compilation_preparation_qualified": all(
+                    row["compile_preparation"]["comparison_qualified"] for row in group
+                ),
                 "repetitions": len(group),
                 "valid_repetitions": len(valid),
-                "all_functional_valid": len(valid) == len(group),
-                "all_c40_sustained_30s": all(
-                    row["capacity_qualified"] for row in group
+                "functional_valid_repetitions": sum(
+                    row["functional_valid"] for row in group
+                ),
+                "all_functional_valid": all(row["functional_valid"] for row in group),
+                "all_comparison_qualified": len(valid) == len(group),
+                "all_server_c40_observed": all(
+                    row["server_c40_observed"] for row in group
+                ),
+                "all_c40_sustained_30s": all(row["c40_sustained_30s"] for row in group),
+                "all_pp_progress_sustained_30s": (
+                    all(row["pp_progress_sustained_30s"] for row in group)
+                    if key[0] == "pp2"
+                    else None
                 ),
                 "dataset_consistent": bool(fingerprints)
                 and None not in fingerprints
@@ -964,10 +1322,14 @@ def dpa_selection(rows, aggregates, attempts):
         cold, warm = by_workload["long-cold"], by_workload["long-warm"]
         if not all(
             group["all_functional_valid"]
-            and group["all_c40_sustained_30s"]
+            and group["all_comparison_qualified"]
+            and group["all_server_c40_observed"]
             and group["dataset_consistent"]
             and group["source_commit"]
             and group["image_digest"]
+            and group["tooling_commit"]
+            and group["configmap_sha256"]
+            and group["all_measurement_identities_verified"]
             and group["metrics"].get("output_throughput", {}).get("median", 0) > 0
             for group in (cold, warm)
         ):
@@ -989,12 +1351,18 @@ def dpa_selection(rows, aggregates, attempts):
             row["profile"],
         )
     )
-    comparable_rows = [
-        row for row in baseline if row["profile"] in {c["profile"] for c in candidates}
-    ]
+    # A mismatched profile must not silently disappear from the identity check
+    # merely because its own cold/warm groups could not form a candidate.
+    comparable_rows = [row for row in baseline if row["purpose"] == "measurement"]
     nodes = {row["_node"] for row in comparable_rows}
     identities = {
-        (row["source_commit"], row["image_digest"]) for row in comparable_rows
+        (
+            row["source_commit"],
+            row["image_digest"],
+            row["tooling_commit"],
+            row["configmap_sha256"],
+        )
+        for row in comparable_rows
     }
     datasets = {row["_dataset"] for row in comparable_rows}
     comparable = (
@@ -1002,9 +1370,12 @@ def dpa_selection(rows, aggregates, attempts):
         and len(nodes) == len(identities) == len(datasets) == 1
         and None not in nodes
         and None not in datasets
+        and all(measurement_provenance_verified(row) for row in comparable_rows)
     )
     attempted = {
-        attempt["profile"] for attempt in attempts if attempt["phase"] == "baseline"
+        attempt["profile"]
+        for attempt in attempts
+        if attempt["phase"] == "baseline" and attempt["purpose"] == "measurement"
     }
     all_screened = {"dpa2", "dpa4", "dpa8"} <= attempted
     candidate = (
@@ -1023,7 +1394,14 @@ def dpa_selection(rows, aggregates, attempts):
         ),
         "all_dpa_profiles_attempted": all_screened,
         "same_node_source_image_dataset": comparable,
-        "ranking": candidates,
+        "same_node_serving_tooling_configmap_dataset": comparable,
+        "identity_comparability_fields": [
+            "source_commit",
+            "image_digest",
+            "tooling_commit",
+            "configmap_sha256",
+        ],
+        "ranking": candidates if comparable else [],
         "ranking_rule": "Maximize the smaller cold/warm median output throughput; cold throughput breaks ties.",
         "final_recommendation_ready": bool(
             candidate and candidates[0]["minimum_repetitions"] >= 3
@@ -1038,9 +1416,17 @@ def dpa_selection(rows, aggregates, attempts):
 
 def analyze(roots, catalog_path=None):
     rows, attempts, issues = [], [], Counter()
+    preparation_rows, preparation_attempts, preparation_campaigns = [], [], []
     catalog = load_catalog(catalog_path)
-    seen_states = set()
+    seen_states, seen_roots = set(), set()
     for root in map(Path, roots):
+        if root.resolve() in seen_roots:
+            continue
+        seen_roots.add(root.resolve())
+        campaign_marker = read_json(root / "PREPARATION.json")
+        campaign_preparation = campaign_marker.get("purpose") == "preparation"
+        campaign_rows = []
+        campaign_attempts = []
         for state_file in sorted(root.glob("*/run-state.json")):
             if state_file.resolve() in seen_states:
                 continue
@@ -1063,44 +1449,172 @@ def analyze(roots, catalog_path=None):
                 ),
                 "export_failed": bool(state.get("export_error")),
                 "cleanup_failed": bool(state.get("cleanup_error")),
+                "purpose": "unspecified",
+                "measurement_job_started": (
+                    state["measurement_job_started"]
+                    if type(state.get("measurement_job_started")) is bool
+                    else None
+                ),
+                "preparation_skipped": state.get("preparation_skipped") is True,
             }
-            attempts.append(attempt)
             result = root / "results" / run_id
+            intent = state.get("purpose")
+            root_provenance = read_json(result / "provenance.json")
+            if (
+                intent == "measurement"
+                or root_provenance.get("purpose") == "measurement"
+            ):
+                attempt["purpose"] = "measurement"
+            elif (
+                intent == "preparation"
+                or root_provenance.get("purpose") == "preparation"
+            ):
+                attempt["purpose"] = "preparation"
+            if campaign_preparation:
+                attempt["purpose"] = "preparation"
+                campaign_attempts.append(attempt)
+                preparation_attempts.append(attempt)
+            elif attempt["purpose"] == "preparation":
+                preparation_attempts.append(attempt)
+            else:
+                attempts.append(attempt)
             log_path = state_file.parent / "server.log"
             log = log_path.read_text(errors="replace") if log_path.is_file() else ""
-            verdicts = sorted(result.glob("r*/verdict.json"))
+            verdicts = sorted(
+                path
+                for path in result.rglob("verdict.json")
+                if re.fullmatch(r"r\d+-(short|long-cold|long-warm)", path.parent.name)
+            )
             if not verdicts:
                 issues["attempt_without_workload_verdict"] += 1
             for verdict_file in verdicts:
-                row = summarize_workload(state, verdict_file, log, catalog)
+                provenance = workload_provenance(verdict_file, result)
+                row = summarize_workload(state, verdict_file, log, catalog, provenance)
                 if row is None:
                     issues["invalid_workload_verdict"] += 1
+                elif campaign_preparation:
+                    row["purpose"] = "preparation"
+                    row["exclusion_basis"] = "campaign_preparation_declaration"
+                    campaign_rows.append(row)
+                    preparation_rows.append(row)
+                elif row["purpose"] == "preparation":
+                    row["exclusion_basis"] = "workload_provenance_purpose"
+                    preparation_rows.append(row)
+                    if row["purpose_declaration_timing"] != "before_workloads":
+                        issues["preparation_declaration_timing_unverified"] += 1
                 else:
                     rows.append(row)
+                    if not measurement_provenance_verified(row):
+                        issues["unqualified_measurement_provenance"] += 1
+                    if not row["compile_preparation"]["comparison_qualified"]:
+                        issues["unqualified_compilation_preparation_evidence"] += 1
+        if campaign_preparation:
+            timing = declaration_timing(
+                campaign_marker.get("classified_at"),
+                min(
+                    (row["_begin"] for row in campaign_rows if number(row["_begin"])),
+                    default=None,
+                ),
+            )
+            flag = campaign_marker.get("exclude_from_comparative_measurements") is True
+            for row in campaign_rows:
+                row["purpose_declaration_timing"] = timing
+            if campaign_rows and (timing != "before_workloads" or not flag):
+                issues["preparation_declaration_timing_unverified"] += 1
+            preparation_campaigns.append(
+                {
+                    "purpose": "preparation",
+                    "excluded": True,
+                    "exclusion_flag_confirmed": flag,
+                    "declaration_timing": timing,
+                    "attempts": len(campaign_attempts),
+                    "workloads": len(campaign_rows),
+                    "source_commit": safe_hash(
+                        campaign_marker.get("source_commit"), 40
+                    ),
+                }
+            )
     aggregates = aggregate(rows)
     selection = dpa_selection(rows, aggregates, attempts)
+    if issues["preparation_declaration_timing_unverified"] and rows:
+        selection.update(
+            screening_candidate=None,
+            ranking=[],
+            final_recommendation_ready=False,
+            status="PREPARATION_CLASSIFICATION_NOT_VERIFIED",
+        )
     public_rows = [
         {key: value for key, value in row.items() if not key.startswith("_")}
         for row in rows
     ]
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "runs": public_rows,
         "aggregates": aggregates,
         "catalog_status": catalog["status"],
         "prefix_placement_comparisons": prefix_placement_comparisons(rows),
         "attempts": attempts,
         "failed_profiles": [row for row in attempts if row["status"] != "measured"],
+        "preparation": {
+            "excluded_workloads": len(preparation_rows),
+            "functional_valid_workloads": sum(
+                row["functional_valid"] for row in preparation_rows
+            ),
+            "functional_failed_workloads": sum(
+                not row["functional_valid"] for row in preparation_rows
+            ),
+            "measurement_workloads_with_preparation_evidence": sum(
+                row["compile_preparation"]["preparation_evidence"] for row in rows
+            ),
+            "measurement_workloads_compile_not_observable": sum(
+                row["compile_preparation"]["inventory_status"] == "not_observable"
+                for row in rows
+            ),
+            "campaigns": preparation_campaigns,
+            "attempts": preparation_attempts,
+            "workloads": [
+                {
+                    key: row[key]
+                    for key in (
+                        "profile",
+                        "phase",
+                        "cache_mode",
+                        "workload",
+                        "repetition",
+                        "source_commit",
+                        "image_digest",
+                        "tooling_commit",
+                        "configmap_sha256",
+                        "functional_valid",
+                        "expected_requests",
+                        "observed_requests",
+                        "invalid_requests",
+                        "purpose_declaration_timing",
+                        "experiment_identity_verified",
+                        "exclusion_basis",
+                        "compile_preparation",
+                    )
+                }
+                for row in preparation_rows
+            ],
+            "scope": "Explicit preparation declarations only; excluded before all aggregate, affinity comparison and selection operations. Counts/status are retained without performance ranking.",
+        },
         "evidence_issues": dict(issues),
         "dpa_selection": selection,
         "c40_rule": {
-            "minimum_seconds": SUSTAINED_SECONDS,
+            "selection_requirement": "At least one valid in-window server observation of 40 or more active requests per workload; functional and comparable-identity checks are separate requirements.",
+            "selection_minimum_samples": 1,
+            "occupancy_definition": "Active server work, including prefill and decode, excluding waiting requests. C40 occupancy does not assert that all 40 requests decode simultaneously.",
+            "diagnostic_sustained_seconds": SUSTAINED_SECONDS,
             "maximum_observation_gap_seconds": MAX_GAP,
-            "pp": "Unique active request IDs on PP0/TP0; additionally 40 common IDs must advance output tokens in consecutive windows.",
+            "pp": "A complete unique set of measured recorder response IDs is required. Count only active IDs from that set on PP0/TP0. Health, warmup, queued and foreign requests never count; retained-ID decode progress is a separate diagnostic.",
             "dpa": "One fresh /v1/loads row for every distinct DP rank; each rank timestamp must advance. The configured interval counts decode iterations, not seconds.",
             "invalid_sample": "Breaks sustained windows; a client concurrency peak never proves server C40.",
+            "diagnostics": "Thirty-second sampled occupancy, the stronger 40-retained-ID progress windows, and active-set turnover are reported independently and do not gate selection.",
+            "sampling_limit": "Sample fractions are not time-weighted duty cycles. Neither a single observation nor a sequence of snapshots proves continuous C40 between samples.",
+            "dpa_progress_limit": "Load snapshots contain group counts, not per-request token progress or active-set turnover; these are not inferred from completed-request or cache aggregates.",
         },
-        "privacy": "Only enumerated labels, counts, allowlisted numeric metrics, source commit and image digest are emitted. Raw infrastructure, request and error metadata remain local.",
+        "privacy": "Only enumerated labels, counts, allowlisted numeric metrics, serving/tooling commit and image/ConfigMap digests are emitted. Raw infrastructure, request and error metadata remain local.",
     }
 
 

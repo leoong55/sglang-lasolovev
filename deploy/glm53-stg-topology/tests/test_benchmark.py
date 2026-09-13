@@ -5,6 +5,7 @@ import io
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -340,8 +341,98 @@ class BenchmarkContractTests(unittest.TestCase):
             )
         builder.assert_not_called()
 
+    def test_compile_inventory_records_only_artifact_metadata_without_following_links(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for backend in benchmark.COMPILE_BACKENDS:
+                path = root / backend / "kernel.bin"
+                path.parent.mkdir()
+                path.write_bytes(b"PRIVATE KERNEL SOURCE")
+            for relative in (
+                "triton/work.lock",
+                "inductor/tmp/intermediate",
+                "cuda/.hidden",
+                "hf/token",
+                "xdg/config",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("PRIVATE")
+            (root / "triton" / "linked-file").symlink_to(root / "hf" / "token")
+            (root / "triton" / "linked-directory").symlink_to(
+                root / "hf", target_is_directory=True
+            )
+            output = benchmark.compile_cache_inventory(str(root))
+            self.assertTrue(output["observable"])
+            self.assertEqual(output["status"], "observed")
+            self.assertEqual(
+                {row["path"] for row in output["files"]},
+                {name + "/kernel.bin" for name in benchmark.COMPILE_BACKENDS},
+            )
+            self.assertTrue(
+                all(
+                    row["size"] == 21 and row["mtime_ns"] > 0 for row in output["files"]
+                )
+            )
+            self.assertEqual(output["errors"], [])
+            self.assertNotIn(folder, json.dumps(output))
+            self.assertNotIn("PRIVATE", json.dumps(output))
+        self.assertFalse(benchmark.compile_cache_inventory(None)["observable"])
+        self.assertFalse(benchmark.compile_cache_inventory(folder)["observable"])
+
+    def test_compile_inventory_marks_unreadable_listing_as_partial(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "triton").mkdir()
+
+            def unreadable(path, *, followlinks, onerror):
+                onerror(PermissionError("private host/path details"))
+                return iter(())
+
+            with patch.object(benchmark.os, "walk", side_effect=unreadable):
+                output = benchmark.compile_cache_inventory(folder)
+            self.assertFalse(output["observable"])
+            self.assertEqual(output["status"], "partial")
+            self.assertEqual(output["errors"], [{"type": "PermissionError"}])
+            self.assertNotIn("private host", json.dumps(output))
+
 
 class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provenance_purpose_defaults_keep_unknown_tooling_revision_explicit(
+        self,
+    ):
+        for mode, purpose in (("smoke", "admission"), ("suite", "measurement")):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as folder:
+                args = SimpleNamespace(
+                    mode=mode,
+                    results_dir=Path(folder),
+                    tokenizer="/model",
+                    profile="pp2",
+                    source_commit="a" * 40,
+                    image_digest="sha256:test",
+                    base_url="http://unused",
+                    workload_timeout=60,
+                )
+                with (
+                    patch.dict(benchmark.os.environ, {}, clear=True),
+                    patch.object(benchmark, "prepare_dataset_catalog", return_value={}),
+                    patch.object(
+                        benchmark.importlib.metadata, "version", return_value="0.23.0"
+                    ),
+                    patch("aiohttp.TCPConnector", return_value=object()),
+                    patch(
+                        "aiohttp.ClientSession",
+                        side_effect=RuntimeError("session boundary"),
+                    ),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "session boundary"):
+                        await benchmark.run(args)
+                provenance = json.loads((Path(folder) / "provenance.json").read_text())
+                self.assertEqual(provenance["purpose"], purpose)
+                self.assertIsNone(provenance["tooling_commit"])
+                self.assertIsNone(provenance["configmap_sha256"])
+
     async def test_run_catalog_own_event_loop_finishes_before_http_session(self):
         class ReachedHttpSession(Exception):
             pass
@@ -372,6 +463,14 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch("aiohttp.TCPConnector", return_value=object()),
                 patch("aiohttp.ClientSession", side_effect=ReachedHttpSession),
+                patch.dict(
+                    benchmark.os.environ,
+                    {
+                        "TOOLING_COMMIT": "b" * 40,
+                        "SCRIPT_CONFIG_SHA256": "c" * 64,
+                        "BENCHMARK_PURPOSE": "preparation",
+                    },
+                ),
             ):
                 with self.assertRaises(ReachedHttpSession):
                     await benchmark.run(args)
@@ -380,6 +479,14 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 provenance["dataset_catalog_sha256"],
                 hashlib.sha256(catalog.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(provenance["source_commit"], "a" * 40)
+            self.assertEqual(provenance["tooling_commit"], "b" * 40)
+            self.assertEqual(provenance["configmap_sha256"], "c" * 64)
+            self.assertEqual(provenance["purpose"], "preparation")
+            self.assertEqual(
+                provenance["benchmark_script_sha256"],
+                hashlib.sha256(Path(benchmark.__file__).read_bytes()).hexdigest(),
             )
 
     async def check_smoke(self, response_mode="separated"):
@@ -402,7 +509,9 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
                 return self.payload
 
         class Session:
-            def post(self, url, json):
+            def post(self, url, json, headers):
+                if headers != {"Connection": "close"}:
+                    raise AssertionError("Smoke probes must use their own connections")
                 calls.append(json)
                 if len(calls) == 1:
                     nonce = json["messages"][0]["content"].removeprefix(
@@ -497,12 +606,197 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(mode=mode):
                 await self.check_smoke(mode)
 
+    async def test_compile_inventory_snapshots_are_outside_measured_subprocess(self):
+        events = []
+
+        class Process:
+            async def wait(self):
+                events.append("child-finished")
+                return 0
+
+        async def launch(*args, **kwargs):
+            events.append("child-started")
+            return Process()
+
+        async def inventory(directory, label):
+            events.append(label + "-inventory")
+
+        async def telemetry(session, args, directory, stop):
+            await stop.wait()
+
+        with tempfile.TemporaryDirectory() as folder:
+            args = SimpleNamespace(
+                results_dir=Path(folder),
+                profile="pp2",
+                tokenizer="/model",
+                base_url="http://unused",
+                workload_timeout=60,
+            )
+            recorder = benchmark.Recorder(None, args.base_url)
+            valid = {
+                "functional_valid": True,
+                "started_at": 1,
+                "finished_at": 2,
+                "expected_requests": 400,
+                "errors": [],
+            }
+
+            async def launch_with_result(*argv, **kwargs):
+                benchmark.write_json(
+                    Path(folder) / "r01-short/vllm.json",
+                    {"completed": 400, "failed": 0},
+                )
+                return await launch(*argv, **kwargs)
+
+            with (
+                patch.object(benchmark, "flush_cache", new_callable=AsyncMock),
+                patch.object(benchmark, "snapshot", new_callable=AsyncMock),
+                patch.object(
+                    benchmark, "snapshot_compile_cache", side_effect=inventory
+                ),
+                patch.object(benchmark, "collect_telemetry", side_effect=telemetry),
+                patch.object(
+                    benchmark.asyncio,
+                    "create_subprocess_exec",
+                    side_effect=launch_with_result,
+                ),
+                patch.object(benchmark, "validate_requests", return_value=valid),
+            ):
+                await benchmark.run_workload(
+                    None, args, recorder, "http://local", "short", 1
+                )
+            self.assertEqual(
+                events,
+                [
+                    "before-inventory",
+                    "child-started",
+                    "child-finished",
+                    "after-inventory",
+                ],
+            )
+
 
 @unittest.skipUnless(
     importlib.util.find_spec("aiohttp"),
     "aiohttp not installed; pure contract tests still run",
 )
 class RecorderIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_smoke_long_request_survives_slow_builder_and_short_keepalive(self):
+        from aiohttp import web
+
+        loop = asyncio.get_running_loop()
+        loop_resumed = threading.Event()
+        main_thread = threading.get_ident()
+        builder_threads, transports, requests, closed_while_building = [], [], [], []
+
+        async def upstream(request):
+            body = await request.json()
+            requests.append(body)
+            transports.append(request.transport)
+            self.assertEqual(request.headers.get("Connection"), "close")
+            if len(requests) == 1:
+                nonce = body["messages"][0]["content"].removeprefix(
+                    "Reply with exactly "
+                )
+                return web.json_response(
+                    {
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {
+                                    "content": nonce,
+                                    "reasoning_content": "separate reasoning",
+                                },
+                            }
+                        ]
+                    }
+                )
+            self.assertEqual(body["messages"][0]["content"], "long smoke input")
+            return web.json_response(
+                {
+                    "choices": [{"finish_reason": "length"}],
+                    "usage": {"completion_tokens": 16, "prompt_tokens": 75012},
+                }
+            )
+
+        class SlowTokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return [1] * (75000 if text == "long smoke input" else 1)
+
+            def decode(self, ids):
+                if len(ids) != 75000:
+                    raise AssertionError("Expected the complete 75k smoke input")
+                return "long smoke input"
+
+        def after_keepalive():
+            closed_while_building.append(transports[0].is_closing())
+            loop_resumed.set()
+
+        def load_tokenizer(*args, **kwargs):
+            builder_threads.append(threading.get_ident())
+            # Four times the server keepalive. This callback cannot execute if
+            # synchronous tokenizer work is still blocking the HTTP event loop.
+            loop.call_soon_threadsafe(lambda: loop.call_later(0.08, after_keepalive))
+            if not loop_resumed.wait(timeout=1):
+                raise AssertionError("Tokenizer build blocked connection cleanup")
+            return SlowTokenizer()
+
+        origin = web.Application()
+        origin.router.add_post("/v1/chat/completions", upstream)
+        runner = web.AppRunner(origin, keepalive_timeout=0.02)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                args = SimpleNamespace(
+                    mode="smoke",
+                    results_dir=Path(folder),
+                    tokenizer="/model",
+                    profile="pp2",
+                    source_commit="a" * 40,
+                    image_digest="sha256:test",
+                    base_url=f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}",
+                    workload_timeout=5,
+                )
+                with (
+                    patch.dict(
+                        sys.modules,
+                        {
+                            "transformers": SimpleNamespace(
+                                AutoTokenizer=SimpleNamespace(
+                                    from_pretrained=load_tokenizer
+                                )
+                            )
+                        },
+                    ),
+                    patch.object(
+                        benchmark.importlib.metadata, "version", return_value="0.23.0"
+                    ),
+                    patch.object(benchmark, "snapshot", new_callable=AsyncMock),
+                    patch.object(benchmark, "flush_cache", new_callable=AsyncMock),
+                ):
+                    self.assertEqual(await benchmark.run(args), 0)
+                metadata = json.loads(
+                    (Path(folder) / "smoke/long-input.json").read_text()
+                )
+                self.assertEqual(metadata["input_tokens_before_chat_template"], 75000)
+                self.assertEqual(
+                    metadata["sha256"], hashlib.sha256(b"long smoke input").hexdigest()
+                )
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(
+                [body["max_completion_tokens"] for body in requests], [2048, 16]
+            )
+            self.assertIsNot(transports[0], transports[1])
+            self.assertEqual(closed_while_building, [True])
+            self.assertTrue(
+                builder_threads
+                and all(value != main_thread for value in builder_threads)
+            )
+        finally:
+            await runner.cleanup()
+
     async def test_runtime_session_reads_metrics_without_decoding_compressed_bytes(
         self,
     ):

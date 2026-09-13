@@ -77,6 +77,7 @@ python3 deploy/glm53-stg-topology/orchestrate.py \
   --kubeconfig /absolute/path/inf-glm53-stg.kubeconfig \
   --image ghcr.io/leoong55/sglang-lasolovev@sha256:IMAGE_DIGEST \
   --commit SOURCE_COMMIT \
+  --tooling-commit TOOLING_COMMIT \
   --node VERIFIED_GPU_NODE \
   --campaign s0913a \
   --output /absolute/path/runs/s0913a
@@ -89,6 +90,19 @@ orchestrator journals mutations, refuses resources without its ownership
 label, runs profiles sequentially, collects ordinary API/log evidence, stops
 serving between profiles, and exports results in checksummed log chunks.
 Completed Jobs remain as evidence; GPU Deployments are scaled to zero.
+
+`TOOLING_COMMIT` identifies the checked-out benchmark/orchestration revision and
+defaults to `SOURCE_COMMIT`. They may differ only when the launcher, installer,
+source manifest, observer, supervisor, Dockerfile and renderer remain identical
+to the serving image's source. Both revisions and the immutable ConfigMap hash
+are recorded. This permits client fixes without changing the model runtime.
+
+Every profile first passes admission smoke, then a full unmeasured rehearsal
+(short, cold long, repeated long), then the requested measurements on the same
+GPU pod. Rehearsal results have `purpose=preparation` in a separate subdirectory;
+the analyzer excludes them from comparisons. A failed rehearsal prevents the
+measured Job from starting. The optional `--skip-preparation` is only for a
+repeat whose image, profile and cache mode already have verified preparation.
 
 For the PP2 and selected DPA finalists, use a new campaign with
 `--phase repeat --profiles pp2 dpaN --repetitions 2` to obtain three total
@@ -119,7 +133,9 @@ The checkpoint's chat template opens `<think>` even when `enable_thinking=false`
 The short correctness probe therefore sets `enable_thinking=true` so the `glm45`
 parser separates reasoning from the final answer. It still requires exact nonce
 content and `finish_reason=stop`, without stripping reasoning tags. This probe
-setting does not change the 400-request short benchmark's sampling settings.
+allows2048 tokens to finish reasoning. Its tokenization runs outside the HTTP
+event loop, and its two POSTs use separate connections. These probe settings do
+not change the 400-request short benchmark's sampling or measured transport.
 Each repetition has a short run, a long run after cache flush (followed by the
 original single-request warmup), and an immediate repeated long run without
 flush. Label these `cold` and `warm`; cold does not mean radix is disabled.
@@ -138,6 +154,13 @@ prefix groups and exact request-body hashes without storing prompts.
 Telemetry includes native `prefill_effective_tokens` and `load_back_tokens`
 counters for observing host-cache activity.
 
+Read-only inventories of compiler artifacts are taken before and after each
+workload, outside timed requests. Preserve DeepGEMM warmup log messages and any
+new or changed compiler artifacts. A timed attempt with further preparation is
+retained as preparation and repeated, independently of its performance result.
+Stable artifacts and absent warmup messages mean no compilation was observed;
+they are not proof that every in-memory JIT path is observable.
+
 The launcher also enables native JSON request logging at level 0. Finished
 events retain request IDs, DP rank and cached-token metadata while excluding
 prompt/output text and token IDs. The analyzer joins recorder response IDs to
@@ -155,6 +178,10 @@ Client C40 is not server C40. DPA load samples count independent groups once;
 PP observer records union of live microbatch request IDs on PP0/TP0, excluding
 queued/finished/retracted requests. Preserve the time series and progress, not
 just one maximum count. Missing observer data is an evidence limitation.
+The analyzer reports observed C40, sample coverage, sustained occupancy,
+decode progress and request turnover separately. A fast turnover of requests
+does not require the same40 IDs to remain active throughout30 seconds. Snapshot
+evidence does not establish uninterrupted occupancy between observations.
 HiCache is judged separately for capacity, correctness, cold/warm latency and
 throughput. Historical CP/DCP numbers from the other cluster are reference-only.
 About2000 outputtok/s is an investigation target, not a promised PASS criterion.

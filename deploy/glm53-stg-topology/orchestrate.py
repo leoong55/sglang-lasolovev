@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import tarfile
@@ -18,6 +19,97 @@ from collections import deque
 from pathlib import Path
 
 import render
+
+SERVING_CRITICAL_FILES = (
+    "Dockerfile",
+    "install.py",
+    "manifest.json",
+    "launch.py",
+    "observe.py",
+    "sitecustomize.py",
+    "supervise.py",
+    "render.py",
+)
+
+
+def verify_revisions(repository, serving_commit, tooling_commit):
+    """Keep model execution fixed while independently versioning the client."""
+    for value in (serving_commit, tooling_commit):
+        if not re.fullmatch(r"[0-9a-f]{40}", value):
+            raise ValueError("Both source revisions must be full commit SHAs")
+    package = "deploy/glm53-stg-topology"
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", package],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if untracked.stdout.strip():
+        raise RuntimeError(
+            "Untracked experiment files prevent a complete tooling revision proof"
+        )
+    checks = [
+        (
+            tooling_commit,
+            [package],
+            "Local experiment scripts differ from tooling commit",
+        ),
+        (
+            serving_commit,
+            [f"{package}/{name}" for name in SERVING_CRITICAL_FILES],
+            "Serving-critical files differ from the image source commit",
+        ),
+    ]
+    for revision, paths, message in checks:
+        checked = subprocess.run(
+            ["git", "diff", "--quiet", revision, "--", *paths], cwd=repository
+        )
+        if checked.returncode:
+            raise RuntimeError(message)
+    return {
+        name: hashlib.sha256((repository / package / name).read_bytes()).hexdigest()
+        for name in SERVING_CRITICAL_FILES
+    }
+
+
+def benchmark_job(args, run_id, profile, purpose, repetitions=1):
+    suffix = {"admission": "-smoke", "preparation": "-prep", "measurement": ""}[purpose]
+    obj = render.benchmark(
+        run_id + suffix,
+        profile,
+        args.image,
+        args.commit,
+        args.node,
+        repetitions,
+        mode="smoke" if purpose == "admission" else "suite",
+    )
+    spec = obj["spec"]["template"]["spec"]
+    container = spec["containers"][0]
+    directory = "/results/" + run_id
+    if purpose != "measurement":
+        directory += "/" + purpose
+    command = container["command"]
+    command[command.index("--results-dir") + 1] = directory
+    container["env"] += [
+        {"name": "TOOLING_COMMIT", "value": args.tooling_commit},
+        {"name": "SCRIPT_CONFIG_SHA256", "value": args.configmap_sha256},
+        {"name": "BENCHMARK_PURPOSE", "value": purpose},
+        {"name": "COMPILE_CACHE_PATH", "value": f"/cache/{args.commit[:12]}/{profile}"},
+    ]
+    container["volumeMounts"].append(
+        {"name": "compile-cache", "mountPath": "/cache", "readOnly": True}
+    )
+    spec["volumes"].append(
+        {
+            "name": "compile-cache",
+            "persistentVolumeClaim": {
+                "claimName": "glm53-topology-compile-cache",
+                "readOnly": True,
+            },
+        }
+    )
+    return obj
 
 
 class Cluster:
@@ -99,16 +191,17 @@ class Cluster:
         p = self.call(
             "get", "deployment", render.SERVICE, "--ignore-not-found", "-o", "json"
         )
-        if not p.stdout.strip():
-            return
-        obj = json.loads(p.stdout)
-        if (
-            obj["metadata"].get("labels", {}).get("app.kubernetes.io/part-of")
-            != render.PART
-        ):
-            raise RuntimeError("Refusing to scale unowned deployment")
-        self.intent("release_gpus", deployment=render.SERVICE)
-        self.call("scale", "deployment", render.SERVICE, "--replicas=0")
+        if p.stdout.strip():
+            obj = json.loads(p.stdout)
+            if (
+                obj["metadata"].get("labels", {}).get("app.kubernetes.io/part-of")
+                != render.PART
+            ):
+                raise RuntimeError("Refusing to scale unowned deployment")
+            self.intent("release_gpus", deployment=render.SERVICE)
+            self.call("scale", "deployment", render.SERVICE, "--replicas=0")
+        # Deleting a Deployment can leave its terminating pods behind. Still
+        # wait for those GPUs to be released before applying the next profile.
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
             pods = self.get("pods", selector="app=" + render.SERVICE)["items"]
@@ -323,9 +416,15 @@ def run_profile(cluster, args, profile, phase, repetitions):
         "run_id": run_id,
         "profile": profile,
         "phase": phase,
+        "purpose": "measurement",
+        "measurement_job_started": False,
         "repetitions": repetitions,
         "started": started,
         "source_commit": args.commit,
+        "tooling_commit": args.tooling_commit,
+        "configmap_sha256": args.configmap_sha256,
+        "serving_critical_sha256": args.serving_critical_sha256,
+        "preparation_skipped": args.skip_preparation,
         "image": args.image,
         "node": args.node,
     }
@@ -341,19 +440,7 @@ def run_profile(cluster, args, profile, phase, repetitions):
         pod = cluster.ready(evidence)
         row["pod_uid"] = pod["metadata"]["uid"]
         cluster.expected_uid = row["pod_uid"]
-        smoke = render.benchmark(
-            run_id + "-smoke",
-            profile,
-            args.image,
-            args.commit,
-            args.node,
-            1,
-            mode="smoke",
-        )
-        command = smoke["spec"]["template"]["spec"]["containers"][0]["command"]
-        command[command.index("--results-dir") + 1] = (
-            "/results/" + run_id + "/admission"
-        )
+        smoke = benchmark_job(args, run_id, profile, "admission")
         (evidence / "smoke-manifest.json").write_text(json.dumps(smoke, indent=2))
         cluster.apply([smoke])
         jobs.append(smoke["metadata"]["name"])
@@ -361,10 +448,20 @@ def run_profile(cluster, args, profile, phase, repetitions):
         ok, _ = cluster.wait_job(smoke["metadata"]["name"], evidence)
         if not ok:
             raise RuntimeError("Correctness or long-context admission smoke failed")
-        obj = render.benchmark(
-            run_id, profile, args.image, args.commit, args.node, repetitions
-        )
+        if not args.skip_preparation:
+            preparation = benchmark_job(args, run_id, profile, "preparation")
+            (evidence / "preparation-manifest.json").write_text(
+                json.dumps(preparation, indent=2)
+            )
+            cluster.apply([preparation])
+            jobs.append(preparation["metadata"]["name"])
+            ok, _ = cluster.wait_job(preparation["metadata"]["name"], evidence)
+            row["preparation_job_success"] = ok
+            if not ok:
+                raise RuntimeError("Full workload preparation failed")
+        obj = benchmark_job(args, run_id, profile, "measurement", repetitions)
         (evidence / "benchmark-manifest.json").write_text(json.dumps(obj, indent=2))
+        row["measurement_job_started"] = True
         cluster.apply([obj])
         jobs.append(obj["metadata"]["name"])
         job_started = True
@@ -414,6 +511,15 @@ def main():
     p.add_argument("--image", required=True)
     p.add_argument("--commit", required=True)
     p.add_argument(
+        "--tooling-commit",
+        help="Defaults to serving commit; serving-critical files must match both revisions",
+    )
+    p.add_argument(
+        "--skip-preparation",
+        action="store_true",
+        help="Only reuse preparation already verified for this profile, image and cache mode",
+    )
+    p.add_argument(
         "--campaign",
         required=True,
         help="Unique short lowercase identifier, e.g. s0913a",
@@ -434,16 +540,12 @@ def main():
     )
     p.add_argument("--repetitions", type=int, default=1)
     args = p.parse_args()
+    args.tooling_commit = args.tooling_commit or args.commit
     cluster = Cluster(args.kubeconfig, args.output)
     repository = Path(__file__).resolve().parents[2]
-    checked = subprocess.run(
-        ["git", "diff", "--quiet", args.commit, "--", "deploy/glm53-stg-topology"],
-        cwd=repository,
+    args.serving_critical_sha256 = verify_revisions(
+        repository, args.commit, args.tooling_commit
     )
-    if checked.returncode:
-        raise RuntimeError(
-            "Local experiment scripts differ from the supplied source commit"
-        )
 
     def interrupted(signum, frame):
         cluster.interrupted = True
@@ -454,6 +556,7 @@ def main():
     signal.signal(signal.SIGINT, interrupted)
     signal.signal(signal.SIGTERM, interrupted)
     cm = render.configmap()
+    args.configmap_sha256 = cm["metadata"]["annotations"]["glm53-script-sha256"]
     (cluster.output / "scripts-configmap.json").write_text(json.dumps(cm, indent=2))
     cluster.apply([cm, *render.storage()])
     rows = []
