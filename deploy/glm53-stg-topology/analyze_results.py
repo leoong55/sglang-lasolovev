@@ -740,7 +740,7 @@ def dpa_evidence(path, begin, end, profile):
     points = []
     previous = None
     cached_polls = 0
-    ages, intervals = [], []
+    ages, intervals, skews = [], [], []
     previous_point = None
     for sample in json_lines(path):
         if not sample:
@@ -778,6 +778,7 @@ def dpa_evidence(path, begin, end, profile):
             continue
         groups = sorted(groups, key=lambda group: group["dp_rank"])
         vector = tuple(group["timestamp"] for group in groups)
+        skews.append(max(vector) - min(vector))
         ages.extend(timestamp - value for value in vector)
         if previous is not None and not all(
             new > old for new, old in zip(vector, previous)
@@ -800,6 +801,148 @@ def dpa_evidence(path, begin, end, profile):
         "distinct_group_snapshot_interval_seconds": distribution(intervals),
         "snapshot_publish_interval_unit": "decode_iterations",
         "snapshot_missing_timestamps": "unobservable; no interval inferred from polling",
+        "cross_rank_timestamp_skew_seconds": distribution(skews),
+        "qualification": "diagnostic_only",
+        "scope": "Sum of independently timestamped DP slots; even fresh snapshots do not establish simultaneous C40.",
+    }
+
+
+DPA_SYNC_CONDITIONS = {
+    "pp1",
+    "dpa",
+    "no_cp",
+    "no_dwdp",
+    "no_elastic",
+    "no_speculation",
+    "no_two_batch_overlap",
+    "no_disaggregation",
+    "moe_a2a_none",
+    "mlp_sync_required",
+    "scheduler_all_gather_enabled",
+}
+
+
+def dpa_step_evidence(log, begin, end, profile, allowed_rids):
+    """Count measured survivors of one common collective forward, never slots.
+
+    The audited observer reads stock process_batch_result after completion.
+    Rank timestamps may differ, but only a complete set with the same logical
+    forward_iter can constitute an observation. No adjacent steps are joined.
+    """
+    expected = int(profile[3:])
+    steps, conflicts = defaultdict(dict), set()
+    duplicates = malformed = ignored_ranks = 0
+    for line in log.splitlines():
+        if "GLM53_DPA_STEP " not in line:
+            continue
+        try:
+            record = json.JSONDecoder().raw_decode(line.split("GLM53_DPA_STEP ", 1)[1])[
+                0
+            ]
+        except ValueError:
+            malformed += 1
+            continue
+        if (
+            not isinstance(record, dict)
+            or not count(record.get("forward_iter"))
+            or not count(record.get("dp_rank"))
+        ):
+            malformed += 1
+            continue
+        step, rank = record["forward_iter"], record["dp_rank"]
+        if any(
+            record.get(key, 0) != 0
+            for key in ("pp_rank", "attn_tp_rank", "attn_cp_rank")
+        ):
+            ignored_ranks += 1
+            continue
+        if rank in steps[step]:
+            if steps[step][rank] != record:
+                conflicts.add(step)
+            else:
+                duplicates += 1
+        else:
+            steps[step][rank] = record
+    points, skews, good_steps = [], [], []
+    failures = Counter()
+    identity_verified = allowed_rids is not None
+    allowed = set(allowed_rids or ())
+    for step, ranks in sorted(steps.items()):
+        timestamps = [row.get("timestamp") for row in ranks.values()]
+        known_times = [value for value in timestamps if number(value)]
+        if known_times and (max(known_times) < begin or min(known_times) > end):
+            continue
+        issues = set()
+        if set(ranks) != set(range(expected)):
+            issues.add("incomplete_or_extra_dp_ranks")
+        if step in conflicts:
+            issues.add("conflicting_rank_records")
+        if step <= 0 or step % 15:
+            issues.add("invalid_step_cadence")
+        if (
+            len(known_times) != len(ranks)
+            or not known_times
+            or not all(begin <= value <= end for value in known_times)
+        ):
+            issues.add("step_time_outside_measurement_or_missing")
+        union = set()
+        for row in ranks.values():
+            conditions = row.get("sync_conditions")
+            if (
+                row.get("valid") is not True
+                or row.get("schema_version") != 1
+                or row.get("sample_every_steps") != 15
+                or row.get("dp_size") != expected
+                or row.get("scope")
+                != "surviving_requests_after_same_collective_forward"
+                or any(
+                    row.get(key) != 0
+                    for key in ("pp_rank", "attn_tp_rank", "attn_cp_rank")
+                )
+                or not isinstance(conditions, dict)
+                or set(conditions) != DPA_SYNC_CONDITIONS
+                or not all(value is True for value in conditions.values())
+            ):
+                issues.add("unverified_sync_conditions_or_observer_record")
+            ids, lengths = row.get("rids"), row.get("output_lengths")
+            if (
+                not isinstance(ids, list)
+                or not all(isinstance(rid, str) and rid for rid in ids)
+                or len(ids) != len(set(ids))
+                or row.get("count") != len(ids)
+                or not isinstance(lengths, dict)
+                or set(lengths) != set(ids)
+                or not all(count(value) for value in lengths.values())
+            ):
+                issues.add("invalid_request_set_or_progress_metadata")
+                continue
+            measured = {
+                rid
+                for rid in ids
+                if rid in allowed and not rid.startswith("HEALTH_CHECK")
+            }
+            if union & measured:
+                issues.add("same_measured_request_on_multiple_dp_ranks")
+            union.update(measured)
+        if not identity_verified:
+            issues.add("measured_response_ids_not_verified")
+        if known_times:
+            points.append((max(known_times), None if issues else len(union)))
+        if issues:
+            failures.update(issues)
+        else:
+            skews.append(max(known_times) - min(known_times))
+            good_steps.append(step)
+    return points, {
+        "status": "observed" if good_steps else "not_observable",
+        "qualified_logical_steps": len(good_steps),
+        "invalid_step_reasons": dict(failures),
+        "deduplicated_records": duplicates,
+        "malformed_records": malformed,
+        "ignored_nonrepresentative_records": ignored_ranks,
+        "cross_rank_result_timestamp_skew_seconds": distribution(skews),
+        "measured_response_ids_verified": identity_verified,
+        "scope": "Surviving measured requests on one shared collective forward_iter; full DP rankset, no TP copies, health, queued, finished or retracted requests. CPU result timestamps need not be simultaneous. No continuity between sampled logical steps is inferred.",
     }
 
 
@@ -1290,14 +1433,25 @@ def summarize_workload(
     points, progress_windows, progress_seconds = [], None, None
     pp_observation = {} if state["profile"] == "pp2" else None
     dpa_observation = None
+    dpa_steps = None
     if begin is not None and end is not None and row["timestamps_valid"]:
         if state["profile"] == "pp2":
             points, progress_windows, progress_seconds = pp_evidence(
                 log, begin, end, row["_pp_allowed_rids"], diagnostics=pp_observation
             )
         else:
-            points, dpa_observation = dpa_evidence(
+            load_points, dpa_observation = dpa_evidence(
                 verdict_file.parent / "telemetry.jsonl", begin, end, state["profile"]
+            )
+            dpa_observation["skewed_running_peak"] = max(
+                (value for _, value in load_points if number(value)), default=None
+            )
+            points, dpa_steps = dpa_step_evidence(
+                log,
+                begin,
+                end,
+                state["profile"],
+                row["_pp_allowed_rids"] if row["_pp_response_ids_complete"] else None,
             )
             info = read_json(verdict_file.parent / "before-server-info.json")
             interval = info.get("load_snapshot_publish_interval")
@@ -1306,7 +1460,7 @@ def summarize_workload(
             )
     valid_points = [value for _, value in points if number(value)]
     sustained = longest_window(points)
-    identity_complete = state["profile"] != "pp2" or row["_pp_response_ids_complete"]
+    identity_complete = row["_pp_response_ids_complete"]
     c40_samples = sum(value >= 40 for value in valid_points)
     observed_c40 = bool(c40_samples and identity_complete)
     affinity, affinity_cache_values = request_affinity(
@@ -1357,6 +1511,7 @@ def summarize_workload(
                 else None
             ),
             "dpa_snapshot_observation": dpa_observation,
+            "dpa_step_observation": dpa_steps,
             # Compatibility field: server occupancy evidence only. Functional
             # validity and comparable identities remain separate selection gates.
             "capacity_qualified": observed_c40,
@@ -1958,11 +2113,11 @@ def analyze(roots, catalog_path=None):
             "diagnostic_sustained_seconds": SUSTAINED_SECONDS,
             "maximum_observation_gap_seconds": MAX_GAP,
             "pp": "A complete unique set of measured recorder response IDs is required. Count only active IDs from that set on PP0/TP0. Health, warmup, queued and foreign requests never count; retained-ID decode progress is a separate diagnostic.",
-            "dpa": "One fresh /v1/loads row for every distinct DP rank; each rank timestamp must advance. The configured interval counts decode iterations, not seconds.",
+            "dpa": "One complete representative DP rankset on the same audited collective forward_iter, with disjoint measured response IDs. Independent /v1/loads timestamps are a skew diagnostic, never a C40 proof.",
             "invalid_sample": "Breaks sustained windows; a client concurrency peak never proves server C40.",
             "diagnostics": "Thirty-second sampled occupancy, the stronger 40-retained-ID progress windows, and active-set turnover are reported independently and do not gate selection.",
             "sampling_limit": "Sample fractions are not time-weighted duty cycles. Neither a single observation nor a sequence of snapshots proves continuous C40 between samples.",
-            "dpa_progress_limit": "Load snapshots contain group counts, not per-request token progress or active-set turnover; these are not inferred from completed-request or cache aggregates.",
+            "dpa_progress_limit": "The observer counts measured survivors of a completed shared forward. Sampling every 15 logical steps does not prove continuous occupancy or unchanged membership between observations.",
         },
         "privacy": "Only enumerated labels, counts, allowlisted numeric metrics, serving/tooling commit and image/ConfigMap digests are emitted. Raw infrastructure, request and error metadata remain local.",
     }

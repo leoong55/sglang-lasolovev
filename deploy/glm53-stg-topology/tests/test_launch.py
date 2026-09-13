@@ -4,10 +4,13 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 BUNDLE = Path(__file__).resolve().parents[1]
 REPO = BUNDLE.parents[1]
@@ -63,7 +66,10 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual(value(command, "--pp-max-micro-batch-size"), "24")
                     self.assertEqual(value(command, "--pp-async-batch-depth"), "0")
                     self.assertEqual(env["GLM53_PP_OBSERVER"], "1")
+                    self.assertEqual(env["GLM53_DPA_OBSERVER"], "0")
                 else:
+                    self.assertEqual(env["GLM53_DPA_OBSERVER"], "1")
+                    self.assertEqual(env["GLM53_PP_OBSERVER"], "0")
                     self.assertIn("--enable-dp-attention", command)
                     self.assertEqual(
                         value(command, "--load-balance-method"), "round_robin"
@@ -211,6 +217,163 @@ class SourceVerificationTests(unittest.TestCase):
 
 
 class ObserverTests(unittest.TestCase):
+    def dpa_scheduler(self):
+        return SimpleNamespace(
+            ps=SimpleNamespace(
+                pp_size=1,
+                pp_rank=0,
+                dp_size=2,
+                dp_rank=0,
+                attn_tp_rank=0,
+                attn_cp_rank=0,
+            ),
+            server_args=SimpleNamespace(
+                pp_size=1,
+                dp_size=2,
+                enable_dp_attention=True,
+                attn_cp_size=1,
+                dcp_size=1,
+                enable_prefill_cp=False,
+                dwdp_size=1,
+                elastic_ep_backend=None,
+                speculative_algorithm=None,
+                enable_two_batch_overlap=False,
+                disaggregation_mode="null",
+                moe_a2a_backend="none",
+            ),
+            spec_algorithm=SimpleNamespace(is_none=lambda: True),
+            require_mlp_sync=True,
+            waiting_queue=[],
+        )
+
+    def dpa_batch(self, step=15):
+        def req(rid, **changes):
+            return SimpleNamespace(
+                **(
+                    {
+                        "rid": rid,
+                        "finished_reason": None,
+                        "is_retracted": False,
+                        "output_ids": [1, 2],
+                    }
+                    | changes
+                )
+            )
+
+        return SimpleNamespace(
+            forward_iter=step,
+            forward_mode=SimpleNamespace(name="DECODE"),
+            reqs=[
+                req("live"),
+                req("finished", finished_reason="length"),
+                req("retracted", is_retracted=True),
+                req("queued"),
+            ],
+        )
+
+    def test_dpa_runtime_conditions_reject_unsupported_sync_variants(self):
+        scheduler = self.dpa_scheduler()
+        self.assertTrue(all(observe.dpa_sync_conditions(scheduler, False).values()))
+        self.assertFalse(all(observe.dpa_sync_conditions(scheduler, True).values()))
+        for field, value in {
+            "pp_size": 2,
+            "dp_size": 1,
+            "enable_dp_attention": False,
+            "attn_cp_size": 2,
+            "dcp_size": 2,
+            "enable_prefill_cp": True,
+            "dwdp_size": 8,
+            "elastic_ep_backend": "elastic",
+            "speculative_algorithm": "draft",
+            "enable_two_batch_overlap": True,
+            "disaggregation_mode": "prefill",
+            "moe_a2a_backend": "deepep",
+        }.items():
+            with self.subTest(field=field):
+                candidate = self.dpa_scheduler()
+                setattr(candidate.server_args, field, value)
+                self.assertFalse(
+                    all(observe.dpa_sync_conditions(candidate, False).values())
+                )
+        scheduler.require_mlp_sync = False
+        self.assertFalse(all(observe.dpa_sync_conditions(scheduler, False).values()))
+
+    def test_dpa_batch_reads_only_live_survivors_and_emits_idle_zero(self):
+        scheduler, batch = self.dpa_scheduler(), self.dpa_batch()
+        scheduler.waiting_queue = [batch.reqs[-1]]
+        conditions = observe.dpa_sync_conditions(scheduler, False)
+        record = observe.dpa_snapshot(scheduler, batch, conditions)
+        self.assertEqual(record["rids"], ["live"])
+        self.assertEqual(record["forward_iter"], 15)
+        self.assertEqual(record["output_lengths"], {"live": 2})
+        batch.reqs = []
+        batch.forward_mode.name = "IDLE"
+        self.assertEqual(observe.dpa_snapshot(scheduler, batch, conditions)["count"], 0)
+        conditions["scheduler_all_gather_enabled"] = False
+        self.assertFalse(observe.dpa_snapshot(scheduler, batch, conditions)["valid"])
+
+    def test_dpa_emission_cadence_representative_rank_and_failure_isolation(self):
+        scheduler, batch = self.dpa_scheduler(), self.dpa_batch()
+        dependency = SimpleNamespace(
+            should_skip_scheduler_all_gather=lambda size: False
+        )
+        with patch.dict(
+            sys.modules,
+            {"sglang.srt.managers.scheduler_components.dp_attn": dependency},
+        ), patch.object(observe.os, "write") as write:
+            observe._emit_dpa(scheduler, batch)
+            self.assertEqual(write.call_count, 1)
+            record = json.loads(
+                write.call_args.args[1].decode().split(observe.DPA_PREFIX)[1]
+            )
+            self.assertTrue(record["valid"])
+            batch.forward_iter = 16
+            observe._emit_dpa(scheduler, batch)
+            self.assertEqual(write.call_count, 1)
+            batch.forward_iter = 30
+            scheduler.ps.attn_tp_rank = 1
+            observe._emit_dpa(scheduler, batch)
+            self.assertEqual(write.call_count, 1)
+            scheduler.ps.attn_tp_rank = 0
+            del scheduler.server_args.dwdp_size
+            observe._emit_dpa(scheduler, batch)
+            record = json.loads(
+                write.call_args.args[1].decode().split(observe.DPA_PREFIX)[1]
+            )
+            self.assertFalse(record["valid"])
+
+    def test_dpa_wrapper_runs_stock_handler_once_then_observes_and_preserves_errors(
+        self,
+    ):
+        observed = []
+
+        class Scheduler:
+            def __init__(self):
+                self.ps = SimpleNamespace(pp_size=1, dp_size=2)
+
+            def process_batch_result(self, batch, result):
+                observed.append("stock")
+                batch.finished = True
+                if result == "fail":
+                    raise RuntimeError("stock failure")
+                return result
+
+        with patch.dict(os.environ, {"GLM53_DPA_OBSERVER": "1"}):
+            observe.wrap_scheduler(Scheduler)
+            observe.wrap_scheduler(Scheduler)
+        scheduler, batch = Scheduler(), SimpleNamespace(finished=False)
+        with patch.object(
+            observe, "_emit_dpa", side_effect=lambda s, b: observed.append(b.finished)
+        ):
+            self.assertEqual(scheduler.process_batch_result(batch, "value"), "value")
+        self.assertEqual(observed, ["stock", True])
+        with patch.object(
+            observe, "_emit_dpa", side_effect=RuntimeError("observer failure")
+        ):
+            self.assertEqual(scheduler.process_batch_result(batch, "value"), "value")
+        with self.assertRaisesRegex(RuntimeError, "stock failure"):
+            scheduler.process_batch_result(batch, "fail")
+
     def test_pp_union_deduplicates_and_excludes_waiting_finished_and_retracted(self):
         def req(rid, finished=None, retracted=False, output_length=4):
             return SimpleNamespace(

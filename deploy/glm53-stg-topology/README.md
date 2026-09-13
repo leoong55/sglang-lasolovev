@@ -8,8 +8,8 @@ Only ClusterIP is exposed. There is no Envoy, ingress, or public serving API.
 The runtime is pinned to upstream
 `0bcd822377da7b5718e674eaf9c870d349424dd1`. The installer verifies critical
 runtime files against this commit and refuses a different base; it does not
-patch scheduling, attention, quantization, or cache policy. The optional PP
-observer samples CPU request metadata without changing scheduler decisions.
+patch scheduling, attention, quantization, or cache policy. The PP and DPA
+observers read CPU request metadata without changing scheduler decisions.
 
 ## Profiles
 
@@ -239,17 +239,26 @@ unobservable; per-group cache totals alone do not prove prefix placement.
 
 Keep raw vLLM output, request metadata, server-info, metric time series,
 GPU/RAM telemetry, manifest, source commit, image IDs, pod UID, and timestamps.
-Long results require300 successful completions,1000 output tokens per request,
+Long results require 300 successful completions, 1000 output tokens per request,
 and `finish_reason=length`. Natural EOS in the short workload is valid and its
 actual length is reported. Missing `cached_tokens` is unobservable, not a hit.
 
-Client C40 is not server C40. DPA load samples count independent groups once;
-PP observer records union of live microbatch request IDs on PP0/TP0, excluding
-queued/finished/retracted requests. Preserve the time series and progress, not
-just one maximum count. Missing observer data is an evidence limitation.
+Client C40 is not server C40. `/v1/loads` contains independently timestamped DP
+slots: their sum and timestamp skew are diagnostics, never a simultaneous C40
+claim. DPA's observer reads surviving requests after the stock result handler
+every 15 logical forwards, on attention-TP0/CP0 of each group. The existing MLP
+metadata collective supplies IDLE batches to empty groups; `run_batch` advances
+`forward_iter` once on every group, and overlap copies preserve it. The analyzer
+requires the complete DP rankset on the same step, a verified measured-response
+ID set, disjoint IDs across groups, and the audited synchronization conditions.
+No barrier is added. Unsupported synchronization configurations fail observation.
+CPU result timestamps can differ; the claim concerns participation in one shared
+forward, not simultaneous HTTP or log delivery. Finished, retracted, queued,
+health and foreign requests do not count. PP records the live microbatch union
+on PP0/TP0. Missing observer data remains an evidence limitation.
 The analyzer reports observed C40, sample coverage, sustained occupancy,
 decode progress and request turnover separately. A fast turnover of requests
-does not require the same40 IDs to remain active throughout30 seconds. Snapshot
+does not require the same 40 IDs to remain active throughout 30 seconds. Snapshot
 evidence does not establish uninterrupted occupancy between observations.
 HiCache is judged separately for capacity, correctness, cold/warm latency and
 throughput. Historical CP/DCP numbers from the other cluster are reference-only.

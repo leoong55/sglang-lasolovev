@@ -14,6 +14,24 @@ def emit(kind, **values):
     print(kind + " " + json.dumps({"timestamp": time.time(), **values}), flush=True)
 
 
+def memory_counters():
+    values, errors = {}, {}
+    for field, filename in (
+        ("cgroup_memory_bytes", "memory.current"),
+        ("cgroup_memory_peak_bytes", "memory.peak"),
+        ("cgroup_memory_limit_bytes", "memory.max"),
+    ):
+        try:
+            value = Path("/sys/fs/cgroup", filename).read_text().strip()
+            values[field] = None if value == "max" else int(value)
+            if values[field] is not None and values[field] < 0:
+                raise ValueError("negative memory counter")
+        except (OSError, ValueError) as error:
+            values[field] = None
+            errors[field] = type(error).__name__
+    return {**values, "cgroup_memory_counter_errors": errors}
+
+
 def collect(stop):
     while not stop.is_set():
         try:
@@ -27,14 +45,11 @@ def collect(stop):
                 capture_output=True,
                 timeout=8,
             )
-            memory = Path("/sys/fs/cgroup/memory.current")
             emit(
                 "GLM53_GPU",
                 rows=p.stdout.strip().splitlines(),
                 returncode=p.returncode,
-                cgroup_memory_bytes=(
-                    int(memory.read_text()) if memory.exists() else None
-                ),
+                **memory_counters(),
             )
         except Exception as e:
             emit("GLM53_GPU_ERROR", error=str(e))

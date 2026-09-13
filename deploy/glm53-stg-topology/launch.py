@@ -145,6 +145,7 @@ def make_launch(profile, model_path, hicache=False, port=8080, environ=None):
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
     env["GLM53_PP_OBSERVER"] = "1" if profile == "pp2" else "0"
+    env["GLM53_DPA_OBSERVER"] = "0" if profile == "pp2" else "1"
     env["PYTHONUNBUFFERED"] = "1"
     return command, env
 
@@ -204,6 +205,7 @@ def main():
         "command": command,
         "pp_layer_partition": env.get("SGLANG_PP_LAYER_PARTITION"),
         "observer": env["GLM53_PP_OBSERVER"] == "1",
+        "dpa_observer": env["GLM53_DPA_OBSERVER"] == "1",
         "expected_local_running_limit": (
             24 if args.profile == "pp2" else 48 // PROFILES[args.profile]["dp"]
         ),

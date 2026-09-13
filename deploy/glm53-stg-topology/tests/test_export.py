@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import random
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,9 @@ class ExportTests(unittest.TestCase):
             root = Path(directory)
             (root / "run1").mkdir()
             (root / "run1" / "result.json").write_text('{"valid":true}\n')
+            (root / "run1" / "payload.bin").write_bytes(
+                random.Random(0).randbytes(2 * 1024 * 1024 + 2048)
+            )
             argv = [
                 sys.executable,
                 str(ROOT / "export.py"),
@@ -27,6 +31,7 @@ class ExportTests(unittest.TestCase):
             manifest = json.loads(
                 subprocess.check_output(argv, text=True).split(" ", 1)[1]
             )
+            self.assertGreater(len(manifest["parts"]), 1)
             parts = []
             for i, expected in enumerate(manifest["parts"]):
                 row = json.loads(

@@ -261,6 +261,40 @@ class AnalyzerTests(unittest.TestCase):
             },
         }
 
+    def dpa_step(self, step=15, timestamp=1, profile="dpa2", rank=0, ids=None):
+        size = int(profile[3:])
+        ids = (
+            ids
+            if ids is not None
+            else [
+                f"secret-request-{index}"
+                for index in range(rank * 40 // size, (rank + 1) * 40 // size)
+            ]
+        )
+        return {
+            "schema_version": 1,
+            "timestamp": timestamp,
+            "forward_iter": step,
+            "sample_every_steps": 15,
+            "dp_rank": rank,
+            "dp_size": size,
+            "pp_rank": 0,
+            "attn_tp_rank": 0,
+            "attn_cp_rank": 0,
+            "valid": True,
+            "sync_conditions": {key: True for key in analysis.DPA_SYNC_CONDITIONS},
+            "forward_mode": "DECODE",
+            "count": len(ids),
+            "rids": ids,
+            "output_lengths": {rid: step for rid in ids},
+            "scope": "surviving_requests_after_same_collective_forward",
+        }
+
+    def dpa_step_log(self, records):
+        return "\n".join(
+            "1970-01-01T00:00:01Z GLM53_DPA_STEP " + json.dumps(row) for row in records
+        )
+
     def test_dpa_recomputes_groups_and_deduplicates_cached_polls(self):
         path = self.root / "telemetry.jsonl"
         rows = [self.dpa(i, server_time=i // 2 * 2) for i in range(35)]
@@ -292,6 +326,120 @@ class AnalyzerTests(unittest.TestCase):
         points, _ = analysis.dpa_evidence(path, 0, 45, "dpa2")
         self.assertEqual(points, [(1, None), (2, None)])
 
+    def test_dpa_skewed_slot_sum_cannot_qualify_c40_without_logical_step_evidence(self):
+        run = self.campaign()
+        (self.root / run / "server.log").write_text("")
+        sample = self.dpa(13)
+        sample["loads"]["loads"][0]["timestamp"] = 10
+        for kind in ("long-cold", "long-warm"):
+            self.linefile(
+                self.root / "results" / run / f"r01-{kind}/telemetry.jsonl", [sample]
+            )
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            self.assertEqual(row["dpa_snapshot_observation"]["skewed_running_peak"], 40)
+            self.assertEqual(
+                row["dpa_snapshot_observation"]["cross_rank_timestamp_skew_seconds"][
+                    "max"
+                ],
+                3,
+            )
+            self.assertFalse(row["server_c40_observed"])
+            self.assertIsNone(row["server_running_peak"])
+        # Actual totals can remain 39: rank0 drops20->19 before rank1 rises19->20.
+        self.assertIsNone(result["dpa_selection"]["screening_candidate"])
+
+    def test_dpa_same_forward_step_handles_result_skew_dedup_idle_and_measured_identity(
+        self,
+    ):
+        allowed = {f"secret-request-{i}" for i in range(40)}
+        rows = [self.dpa_step(15, 10, rank=0), self.dpa_step(15, 12, rank=1)]
+        rows[0]["rids"] += ["HEALTH_CHECK_probe", "private foreign request"]
+        rows[0]["output_lengths"].update(
+            {"HEALTH_CHECK_probe": 1, "private foreign request": 1}
+        )
+        rows[0]["count"] += 2
+        # Ignore a TP copy even if its counter and payload would inflate counts.
+        rows += [rows[0], rows[0] | {"attn_tp_rank": 1}]
+        points, evidence = analysis.dpa_step_evidence(
+            self.dpa_step_log(reversed(rows)), 0, 20, "dpa2", allowed
+        )
+        self.assertEqual(points, [(12, 40)])
+        self.assertEqual(evidence["cross_rank_result_timestamp_skew_seconds"]["max"], 2)
+        self.assertEqual(evidence["deduplicated_records"], 1)
+        self.assertEqual(evidence["ignored_nonrepresentative_records"], 1)
+        self.assertNotIn("private foreign", json.dumps(evidence))
+        idle = [self.dpa_step(30, 13, rank=0, ids=[]), self.dpa_step(30, 13, rank=1)]
+        idle[0]["forward_mode"] = "IDLE"
+        points, _ = analysis.dpa_step_evidence(
+            self.dpa_step_log(idle), 0, 20, "dpa2", allowed
+        )
+        self.assertEqual(points, [(13, 20)])
+        points, _ = analysis.dpa_step_evidence(
+            self.dpa_step_log(rows), 0, 20, "dpa2", None
+        )
+        self.assertFalse(any(value is not None for _, value in points))
+
+    def test_dpa_same_step_rejects_missing_duplicate_foreign_scope_and_unsupported_conditions(
+        self,
+    ):
+        allowed = {f"secret-request-{i}" for i in range(40)}
+        for defect in (
+            "missing_rank",
+            "different_step",
+            "duplicate_rank",
+            "shared_rid",
+            "unsupported_sync",
+            "missing_condition",
+            "outside_window",
+            "unknown_timestamp",
+            "cadence",
+            "invalid",
+            "bad_lengths",
+        ):
+            with self.subTest(defect=defect):
+                rows = [self.dpa_step(rank=0), self.dpa_step(rank=1)]
+                if defect == "missing_rank":
+                    rows.pop()
+                elif defect == "different_step":
+                    rows[1]["forward_iter"] = 30
+                elif defect == "duplicate_rank":
+                    rows[1]["dp_rank"] = 0
+                elif defect == "shared_rid":
+                    rows[1] = self.dpa_step(rank=1, ids=rows[0]["rids"])
+                elif defect == "unsupported_sync":
+                    rows[1]["sync_conditions"]["scheduler_all_gather_enabled"] = False
+                elif defect == "missing_condition":
+                    del rows[1]["sync_conditions"]["no_elastic"]
+                elif defect == "outside_window":
+                    rows[1]["timestamp"] = -1
+                elif defect == "unknown_timestamp":
+                    rows[1]["timestamp"] = None
+                elif defect == "cadence":
+                    rows[1]["sample_every_steps"] = 1
+                elif defect == "invalid":
+                    rows[1]["valid"] = False
+                else:
+                    rows[1]["output_lengths"].clear()
+                points, evidence = analysis.dpa_step_evidence(
+                    self.dpa_step_log(rows), 0, 20, "dpa2", allowed
+                )
+                self.assertFalse(any(value is not None for _, value in points))
+                self.assertEqual(evidence["status"], "not_observable")
+
+    def test_dpa_completed_response_id_coverage_is_required_even_with_good_step_records(
+        self,
+    ):
+        run = self.campaign()
+        path = self.root / "results" / run / "r01-long-cold/requests.jsonl"
+        records = list(analysis.json_lines(path))
+        records[-1]["response_id"] = records[-2]["response_id"]
+        self.linefile(path, records)
+        result = analysis.analyze([self.root])
+        cold = next(row for row in result["runs"] if row["workload"] == "long-cold")
+        self.assertFalse(cold["server_c40_observed"])
+        self.assertFalse(cold["dpa_step_observation"]["measured_response_ids_verified"])
+
     def campaign(
         self, profile="dpa2", phase="baseline", repetition=1, throughput=500, cache=True
     ):
@@ -314,7 +462,15 @@ class AnalyzerTests(unittest.TestCase):
         }
         self.write(self.root / run_id / "run-state.json", state)
         (self.root / run_id / "server.log").write_text(
-            "1970-01-01T00:00:01Z server observed\n"
+            self.dpa_step_log(
+                [
+                    self.dpa_step((timestamp + 1) * 15, timestamp, profile, rank)
+                    for timestamp in range(41)
+                    for rank in range(int(profile[3:]))
+                ]
+            )
+            if profile != "pp2"
+            else "1970-01-01T00:00:01Z server observed\n"
         )
         self.write_raw_log(run_id)
         self.write(
@@ -336,6 +492,7 @@ class AnalyzerTests(unittest.TestCase):
                     {
                         "measured": True,
                         "request_id": f"private-request-{index}",
+                        "response_id": f"secret-request-{index}",
                         "status": 200,
                         "sse_done": True,
                         "finish_reasons": {"0": "length"},
@@ -593,6 +750,14 @@ class AnalyzerTests(unittest.TestCase):
     def test_dpa_selection_uses_observed_c40_without_added_duration_threshold(self):
         for profile, speed in (("dpa2", 500), ("dpa4", 600), ("dpa8", 550)):
             run = self.campaign(profile=profile, throughput=speed)
+            (self.root / run / "server.log").write_text(
+                self.dpa_step_log(
+                    [
+                        self.dpa_step(15, 5, profile, rank)
+                        for rank in range(int(profile[3:]))
+                    ]
+                )
+            )
             for kind in ("long-cold", "long-warm"):
                 path = self.root / "results" / run / f"r01-{kind}/telemetry.jsonl"
                 self.linefile(path, [self.dpa(5, profile)])
@@ -615,6 +780,23 @@ class AnalyzerTests(unittest.TestCase):
             for group in sample["loads"]["loads"]:
                 group["num_waiting_reqs"] = 100
             self.linefile(path, [sample])
+        (self.root / "campaign-dpa4-baseline/server.log").write_text(
+            self.dpa_step_log(
+                [
+                    self.dpa_step(
+                        15,
+                        5,
+                        "dpa4",
+                        rank,
+                        [
+                            f"secret-request-{i}"
+                            for i in range(rank * 9, (rank + 1) * 9)
+                        ],
+                    )
+                    for rank in range(4)
+                ]
+            )
+        )
         output = analysis.analyze([self.root])
         self.assertEqual(output["dpa_selection"]["screening_candidate"], "dpa8")
         self.assertTrue(
@@ -627,6 +809,7 @@ class AnalyzerTests(unittest.TestCase):
 
     def test_missing_server_evidence_never_substitutes_success_or_client_c40(self):
         run = self.campaign()
+        (self.root / run / "server.log").write_text("")
         for kind in ("long-cold", "long-warm"):
             path = self.root / "results" / run / f"r01-{kind}/telemetry.jsonl"
             self.linefile(
@@ -1160,6 +1343,7 @@ class AnalyzerTests(unittest.TestCase):
                     value["failed"] = 1
                     self.write(path, value)
                 elif deficiency == "missing_c40":
+                    (self.root / run / "server.log").write_text("")
                     self.linefile(
                         directory / "telemetry.jsonl",
                         [self.dpa(i, "dpa4", count=36) for i in range(41)],

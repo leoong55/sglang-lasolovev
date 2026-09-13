@@ -43,7 +43,9 @@ def main():
                         with path.open("rb") as f:
                             tar.addfile(info, f)
         tmp.seek(0)
-        chunk_size = 256 * 1024
+        # One base64 record stays below 1.4 MiB, well below normal kubelet log
+        # rotation, while avoiding a separate CPU Job for every 256 KiB.
+        chunk_size = 1024 * 1024
         parts = []
         digest = hashlib.sha256()
         while raw := tmp.read(chunk_size):
