@@ -758,7 +758,9 @@ async def smoke(session: Any, args: argparse.Namespace) -> None:
     body = {
         "model": MODEL,
         "messages": [{"role": "user", "content": f"Reply with exactly {nonce}"}],
-        "max_completion_tokens": 128,
+        # The checkpoint reasons before answering even for a nonce. This is a
+        # correctness probe, so allow reasoning to finish before checking EOS.
+        "max_completion_tokens": 2048,
         "temperature": 0,
         # This checkpoint's template always opens <think>. Keep glm45 reasoning
         # extraction enabled so only the final answer is checked against nonce.
@@ -866,7 +868,9 @@ async def run(args: argparse.Namespace) -> int:
     version = importlib.metadata.version("vllm")
     if version.split("+")[0] != "0.23.0":
         raise RuntimeError(f"Expected pinned vLLM 0.23.0, found {version}")
-    catalog_provenance = prepare_dataset_catalog(args)
+    # Catalog capture has its own asyncio.run() for the pinned vLLM client.
+    # Complete it offline in a worker before starting the HTTP session.
+    catalog_provenance = await asyncio.to_thread(prepare_dataset_catalog, args)
     write_json(
         provenance_path,
         {

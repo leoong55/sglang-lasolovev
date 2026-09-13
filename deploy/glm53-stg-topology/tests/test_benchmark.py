@@ -342,6 +342,46 @@ class BenchmarkContractTests(unittest.TestCase):
 
 
 class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_catalog_own_event_loop_finishes_before_http_session(self):
+        class ReachedHttpSession(Exception):
+            pass
+
+        async def capture():
+            return {"schema_version": 1, "samples": []}
+
+        def build(path):
+            return asyncio.run(capture())
+
+        with tempfile.TemporaryDirectory() as folder:
+            args = SimpleNamespace(
+                mode="suite",
+                results_dir=Path(folder),
+                tokenizer="/model",
+                profile="pp2",
+                source_commit="a" * 40,
+                image_digest="sha256:test",
+                base_url="http://internal:8080",
+                workload_timeout=60,
+            )
+            with (
+                patch.dict(
+                    sys.modules, {"dataset_catalog": SimpleNamespace(build=build)}
+                ),
+                patch.object(
+                    benchmark.importlib.metadata, "version", return_value="0.23.0"
+                ),
+                patch("aiohttp.TCPConnector", return_value=object()),
+                patch("aiohttp.ClientSession", side_effect=ReachedHttpSession),
+            ):
+                with self.assertRaises(ReachedHttpSession):
+                    await benchmark.run(args)
+            catalog = Path(folder) / "dataset-catalog.json"
+            provenance = json.loads((Path(folder) / "provenance.json").read_text())
+            self.assertEqual(
+                provenance["dataset_catalog_sha256"],
+                hashlib.sha256(catalog.read_bytes()).hexdigest(),
+            )
+
     async def check_smoke(self, response_mode="separated"):
         calls = []
 
@@ -373,6 +413,9 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
                     separated = json["chat_template_kwargs"]["enable_thinking"]
                     content = nonce if separated else f"<think>reasoning</think>{nonce}"
                     reason = "stop"
+                    # The real checkpoint can use 128 tokens before its EOS.
+                    if json["max_completion_tokens"] < 256:
+                        reason = "length"
                     if response_mode == "raw_tags":
                         content = f"<think>reasoning</think>{nonce}"
                     elif response_mode == "wrong_nonce":
