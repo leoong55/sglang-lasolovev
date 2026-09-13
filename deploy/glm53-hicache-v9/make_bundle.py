@@ -92,7 +92,7 @@ def main():
                 upstream_pr_head=PR_HEAD,
                 gpu_validated=False,
                 image_built_here=False,
-                profile="glm53-hicache-v9.7",
+                profile="glm53-hicache-v9.8",
             ),
             indent=2,
         )

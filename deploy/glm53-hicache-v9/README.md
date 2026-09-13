@@ -1,5 +1,35 @@
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 
+## v9.8: opt-in CP decode attention reduction + RMSNorm
+
+Image tag: `glm53-hicache-v9.8-0bcd822377da`. Cumulative over v9.7
+(`89d352f6fb8eadfa69f3fa78a7086dc448474e64`); the new optimization is **off**
+by default. `--glm53-cp-decode-fusion attention` fuses the attention output
+all-reduce with its following residual addition and RMSNorm, only for ordinary
+BF16 decode on single-node SM90 TP8/EP8/CP8/DCP4 with full decode graphs.
+Prefill, DCP KV collectives, MoE weight kernels and the checkpoint stay as before.
+The launcher currently rejects combining this experimental option with DFlash.
+All previous DFlash/HiCache functionality remains available with the option off.
+
+The CP attention-TP group has size one. Fusion explicitly uses the EP8 workspace
+only if its ordered peers match global TP8 exactly. No workspace is allocated
+inside attention or graph capture. If the workspace is unavailable, the normal
+projection reduction runs; if the fusion API declines a deferred reduction,
+the fallback explicitly performs that reduction before normalizing.
+
+The required `trtllm` backend also enables upstream allreduce-only dispatch for
+eligible group coordinators. Therefore test **three** arms on the same image:
+original backend, FlashInfer backend alone, then attention fusion. Do not
+attribute the combined improvement solely to RMSNorm fusion.
+
+Includes an 8-GPU eager/graph numerical check and a one-GPU synthetic comparison
+of W4AFP8 CUTLASS versus FP8 Triton/DeepGEMM at the GLM53 local-expert geometry.
+CPU controls have been tested; **GPU parity, image build, startup and speed have
+not been validated here**. No 2x speedup is claimed. See
+[V9.8-VALIDATION.md](benchmarks/V9.8-VALIDATION.md) for commands and acceptance criteria.
+
+The sections below retain the history of earlier revisions.
+
 ## v9.7: producer-only HiCache index storage and bounded draft continuity
 
 Image tag: `glm53-hicache-v9.7-0bcd822377da`. Based on the complete v9.6

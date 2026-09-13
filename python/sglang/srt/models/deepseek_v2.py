@@ -80,6 +80,7 @@ from sglang.srt.layers.communicator_dsa_cp import (
     maybe_prefetch_next_full_attention_kv,
 )
 from sglang.srt.layers.cp.cp_decode_attn_tp import get_cp_decode_attn_tp_ctx
+from sglang.srt.layers.cp import glm53_decode_fusion
 from sglang.srt.layers.cp.utils import is_cp_v2_active
 from sglang.srt.layers.dcp.planner import (
     prepare_decode_context_parallel_metadata,
@@ -2536,15 +2537,21 @@ class DeepseekV2DecoderLayer(nn.Module):
         )
 
         with self.self_attn.maybe_use_decode_attn_tp(forward_batch):
-            hidden_states = self.self_attn(
-                positions=positions,
-                hidden_states=hidden_states,
-                forward_batch=forward_batch,
-                zero_allocator=zero_allocator,
-                llama_4_scaling=llama_4_scaling,
-                layer_scatter_modes=self.layer_scatter_modes,
-                prev_topk_indices=prev_topk_indices,
+            fuse_cp_attention = glm53_decode_fusion.eligible(
+                self, forward_batch, hidden_states, residual
             )
+            with glm53_decode_fusion.defer_output_reduce(
+                self.self_attn.o_proj, fuse_cp_attention
+            ):
+                hidden_states = self.self_attn(
+                    positions=positions,
+                    hidden_states=hidden_states,
+                    forward_batch=forward_batch,
+                    zero_allocator=zero_allocator,
+                    llama_4_scaling=llama_4_scaling,
+                    layer_scatter_modes=self.layer_scatter_modes,
+                    prev_topk_indices=prev_topk_indices,
+                )
         if isinstance(hidden_states, tuple):
             hidden_states, topk_indices = hidden_states
         else:
@@ -2555,9 +2562,14 @@ class DeepseekV2DecoderLayer(nn.Module):
             forward_batch, next_full_attention_layer_id
         )
 
-        hidden_states, residual = self.layer_communicator.prepare_mlp(
-            hidden_states, residual, forward_batch
-        )
+        if fuse_cp_attention:
+            hidden_states, residual = glm53_decode_fusion.finish(
+                hidden_states, residual, self.post_attention_layernorm
+            )
+        else:
+            hidden_states, residual = self.layer_communicator.prepare_mlp(
+                hidden_states, residual, forward_batch
+            )
 
         fuse_mlp_allreduce = (
             self.layer_communicator.should_fuse_mlp_allreduce_with_next_layer(

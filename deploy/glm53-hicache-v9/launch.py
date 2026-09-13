@@ -40,6 +40,8 @@ def check_profile(argv):
     p.add_argument("--cuda-graph-max-bs-prefill", type=int)
     p.add_argument("--speculative-algorithm", choices=["DFLASH"])
     p.add_argument("--glm53-draft-cache-window", type=int, choices=[0, 2048], default=0)
+    p.add_argument("--glm53-cp-decode-fusion", choices=["off", "attention"], default="off")
+    p.add_argument("--flashinfer-allreduce-fusion-backend")
     p.add_argument("--speculative-draft-model-path")
     p.add_argument("--speculative-draft-model-quantization", choices=["unquant"])
     p.add_argument("--speculative-draft-attention-backend", choices=["fa4"])
@@ -103,23 +105,40 @@ def check_profile(argv):
                        "--enable-memory-saver", "--speculative-draft-window-size"}
         if any(x.split("=", 1)[0] in unsupported for x in argv):
             p.error("Bounded draft requires the ordinary colocated pool; remove unified-memory, disaggregation, memory-saver and separate draft-window overrides")
+    if args.glm53_cp_decode_fusion == "attention":
+        if args.speculative_algorithm or args.cuda_graph_backend_decode != "full":
+            p.error("CP attention fusion currently requires full decode graphs and speculation off")
+        if max(args.max_running_requests, args.cuda_graph_max_bs_decode) > 2048:
+            p.error("CP attention fusion supports at most 2048 decode rows")
+        if args.flashinfer_allreduce_fusion_backend not in (None, "trtllm"):
+            p.error("CP attention fusion requires the trtllm allreduce backend")
+        conflicts = {"--enforce-disable-flashinfer-allreduce-fusion", "--enable-deterministic-inference"}
+        if any(x.split("=", 1)[0] in conflicts for x in argv):
+            p.error("Remove conflicting deterministic/disabled/global-allreduce options for the CP fusion A/B")
     return args
 
 
 def runtime_argv(argv):
-    """Consume only the launcher-owned bounded-cache option."""
+    """Consume launcher-owned options; request workspace allocation for fusion."""
     result = []
+    owned = {"--glm53-draft-cache-window", "--glm53-cp-decode-fusion"}
+    fusion = "off"
     i = 0
     while i < len(argv):
         token = argv[i]
-        if token == "--glm53-draft-cache-window":
+        option = token.split("=", 1)[0]
+        if option == "--glm53-cp-decode-fusion":
+            fusion = token.split("=", 1)[1] if "=" in token else argv[i + 1]
+        if token in owned:
             i += 2
             continue
-        if token.startswith("--glm53-draft-cache-window="):
+        if option in owned and "=" in token:
             i += 1
             continue
         result.append(token)
         i += 1
+    if fusion == "attention" and not any(x.split("=", 1)[0] == "--flashinfer-allreduce-fusion-backend" for x in result):
+        result += ["--flashinfer-allreduce-fusion-backend", "trtllm"]
     return result
 
 
@@ -132,6 +151,7 @@ def configure_runtime_env(profile):
     os.environ["SGLANG_GLM53_HICACHE_DCP"] = "1" if profile.enable_hierarchical_cache else "0"
     os.environ["SGLANG_ENABLE_UNIFIED_RADIX_TREE"] = "1"
     os.environ["SGLANG_GLM53_DRAFT_CACHE_WINDOW"] = str(profile.glm53_draft_cache_window)
+    os.environ["SGLANG_GLM53_CP_DECODE_FUSION"] = "1" if profile.glm53_cp_decode_fusion == "attention" else "0"
     for name, enabled in (
         ("SGLANG_GLM53_HICACHE_INDEX_ELISION", profile.enable_hierarchical_cache),
         ("SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH", bool(profile.glm53_draft_cache_window)),
@@ -149,6 +169,7 @@ if __name__ == "__main__":
     configure_runtime_env(profile)
     argv = runtime_argv(argv)
     print(f"glm53: speculation={profile.speculative_algorithm or 'off'}; "
+          f"cp-decode-fusion={profile.glm53_cp_decode_fusion}; "
           f"hicache={profile.enable_hierarchical_cache}; max-running={profile.max_running_requests}; "
           f"bounded-draft-window={profile.glm53_draft_cache_window}; "
           f"hicache-index-elision={os.environ['SGLANG_GLM53_HICACHE_INDEX_ELISION']}; "
