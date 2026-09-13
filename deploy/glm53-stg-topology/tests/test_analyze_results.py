@@ -706,7 +706,7 @@ class AnalyzerTests(unittest.TestCase):
             )
         self.pp_campaign(observations)
         output = analysis.analyze([self.root])
-        self.assertEqual(output["schema_version"], 4)
+        self.assertEqual(output["schema_version"], 5)
         for row in output["runs"]:
             self.assertTrue(row["functional_valid"])
             self.assertTrue(row["server_c40_observed"])
@@ -1665,6 +1665,55 @@ class AnalyzerTests(unittest.TestCase):
         ):
             self.assertNotIn(private, rendered)
 
+    def test_timestamp_inversion_preserves_bytes_and_transport_verification(self):
+        run = self.campaign()
+        self.write_follow_log(
+            run,
+            ["1970-01-01T00:00:20.548Z stdout\n" "1970-01-01T00:00:20.533Z stderr\n"],
+        )
+        path = self.root / run / "server-follow.log"
+        original = path.read_bytes()
+        result = analysis.analyze([self.root])
+        self.assertEqual(path.read_bytes(), original)
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertTrue(evidence["comparison_qualified"])
+            segment = evidence["follow_log_provenance"]["segments"][0]
+            self.assertEqual(segment["clock_regressions"], 1)
+            self.assertEqual(segment["timestamp_order"], "nonmonotonic")
+            self.assertAlmostEqual(segment["maximum_timestamp_envelope_seconds"], 0.015)
+
+    def test_outside_marker_with_inverted_boundary_envelope_blocks_qualification(self):
+        for log in (
+            "1970-01-01T00:00:00.005Z ahead\n"
+            "1969-12-31T23:59:59.995Z DeepGEMM warmup\n",
+            "1970-01-01T00:00:40.005Z DeepGEMM warmup\n"
+            "1970-01-01T00:00:39.995Z behind\n",
+            "1970-01-01T00:00:35Z ahead\n" "1969-12-31T23:59:59Z DeepGEMM warmup\n",
+        ):
+            with self.subTest(log=log):
+                run = self.campaign()
+                self.write_follow_log(run, [log])
+                result = analysis.analyze([self.root])
+                for row in result["runs"]:
+                    evidence = row["compile_preparation"]
+                    self.assertTrue(evidence["follow_log_window_verified"])
+                    self.assertEqual(
+                        evidence["in_window_markers"], {"deepgemm_warmup": 1}
+                    )
+                    self.assertEqual(
+                        evidence["marker_lines_with_timestamp_uncertainty"], 1
+                    )
+                    self.assertFalse(evidence["comparison_qualified"])
+
+    def test_timestamp_envelopes_cover_cumulative_inversions_and_keep_order(self):
+        original = [0, 20, 15, 10, None, 30]
+        self.assertEqual(
+            analysis.timestamp_envelopes(original),
+            [(0, 0), (10, 20), (10, 20), (10, 20), None, (30, 30)],
+        )
+        self.assertEqual(original, [0, 20, 15, 10, None, 30])
+
     def test_follow_integrity_segment_metadata_and_transport_defects_fail_closed(self):
         for defect in (
             "bytes",
@@ -1674,6 +1723,7 @@ class AnalyzerTests(unittest.TestCase):
             "timestamp",
             "records",
             "clock_regressions",
+            "forged_clock_regression_count",
             "partial",
             "unframed",
             "restart",
@@ -1717,6 +1767,7 @@ class AnalyzerTests(unittest.TestCase):
                         "ranges": ("byte_end", meta["log_bytes"] - 1),
                         "timestamp": ("last_cri_timestamp", 46),
                         "records": ("records", 10000),
+                        "forged_clock_regression_count": ("clock_regressions", 10),
                         "restart": ("restart_count", 1),
                         "container": ("container_id", "private foreign container"),
                         "late_connect": ("started_at", 10),

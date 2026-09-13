@@ -145,6 +145,21 @@ status. The collector stops when all expected profile attempts are recorded
 and serving pods are gone. If stopping it manually, wait until experimental
 GPU pods have quiesced, then send Ctrl-C. It does not stop GPU workloads itself.
 
+Schema5 distinguishes transport continuity from timestamp order. Containerd
+creates separate stdout/stderr loggers and timestamps a record before taking
+the shared writer lock, so their merged records can arrive out of timestamp
+order ([loggers](https://github.com/containerd/containerd/blob/main/internal/cri/server/container_start.go),
+[timestamp and write](https://github.com/containerd/containerd/blob/main/internal/cri/io/logger.go),
+[writer lock](https://github.com/containerd/containerd/blob/main/pkg/ioutil/write_closer.go)).
+The analyzer preserves bytes, order and the observed inversion count. For
+compile markers it uses the suffix-minimum/prefix-maximum timestamp envelope
+at each original record position. Any overlap with a workload window blocks
+qualification; there is no tolerated-skew threshold. Boundary coverage,
+collector identity, checksums, framing and separate reconnect segments remain
+required. This handles observed inversions, not unobserved clock drift or
+hidden log loss. The first such inversion was found during preparation,
+before the common-image measurements began.
+
 ## CPU client validation
 
 `client_harness.py` runs the actual pinned vLLM client and checkpoint tokenizer

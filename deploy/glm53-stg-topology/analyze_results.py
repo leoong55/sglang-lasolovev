@@ -5,7 +5,9 @@ are reconstructed independently from its artifacts. Public output uses an explic
 schema; paths, URLs, IDs, prompts, errors, and arbitrary metric keys never pass
 through. Raw artifacts remain under the supplied local campaign directories.
 
-Schema 4 separates server-observed C40 from occupancy duration and decode
+Schema 5 preserves out-of-order CRI timestamps and conservatively expands
+compile-marker attribution across their timestamp envelopes. It separates
+server-observed C40 from occupancy duration and decode
 progress. The accepted workload requires observed server concurrency, not a
 30-second cohort of unchanged requests. Selection therefore requires a valid
 server observation of at least 40 active requests, alongside independent
@@ -222,6 +224,30 @@ def cri_timestamp(line):
         return None
 
 
+def timestamp_envelopes(timestamps):
+    """Preserve record order; enclose every observed timestamp inversion.
+
+    Merged stdout/stderr records need not arrive in timestamp order. A marker
+    receives the suffix minimum and prefix maximum around its original byte
+    position. Backwards runs therefore widen attribution instead of moving or
+    dropping records. There is no tolerated-skew threshold.
+    """
+    lower, minimum = [None] * len(timestamps), None
+    for index in range(len(timestamps) - 1, -1, -1):
+        value = timestamps[index]
+        if number(value):
+            minimum = value if minimum is None else min(minimum, value)
+            lower[index] = minimum
+    maximum, result = None, []
+    for index, value in enumerate(timestamps):
+        if number(value):
+            maximum = value if maximum is None else max(maximum, value)
+            result.append((lower[index], maximum))
+        else:
+            result.append(None)
+    return result
+
+
 def verified_follow_log(directory, state):
     """Return private segment text separately from safe, verified provenance.
 
@@ -301,8 +327,8 @@ def verified_follow_log(directory, state):
         first, last = (framed[0], framed[-1]) if framed else (None, None)
         if not framed:
             segment_issues.append("segment_has_no_timestamped_records")
-        if partial or unframed or regressions:
-            segment_issues.append("segment_framing_or_clock_not_verified")
+        if partial or unframed:
+            segment_issues.append("segment_framing_not_verified")
         for key, expected in {
             "first_cri_timestamp": first,
             "last_cri_timestamp": last,
@@ -340,6 +366,11 @@ def verified_follow_log(directory, state):
                 "unframed_records": unframed,
                 "partial_line_bytes": partial,
                 "clock_regressions": regressions,
+                "timestamp_order": "nonmonotonic" if regressions else "monotonic",
+                "maximum_timestamp_envelope_seconds": max(
+                    (high - low for low, high in timestamp_envelopes(framed)),
+                    default=0,
+                ),
                 "interruption_observed_after_segment": segment.get("interruption")
                 is not None,
             }
@@ -525,16 +556,20 @@ def compile_preparation_evidence(
     timestamped_lines = 0
     # Only verified binary capture grounds embedded CR fragments in the same
     # timestamped LF record. Never attach a timestamp to an unframed next line.
-    for line in log.split("\n"):
-        timestamp = cri_timestamp(line)
+    lines = log.split("\n")
+    timestamps = [cri_timestamp(line) for line in lines]
+    envelopes = timestamp_envelopes(timestamps)
+    uncertain_markers = 0
+    for line, timestamp, envelope in zip(lines, timestamps, envelopes):
         timestamped_lines += timestamp is not None
         found = [key for key, text in COMPILE_MARKERS.items() if text in line]
         if not found:
             continue
         if timestamp is None or not window:
             unattributed += 1
-        elif begin <= timestamp <= end:
+        elif envelope[0] <= end and envelope[1] >= begin:
             markers.update(found)
+            uncertain_markers += envelope[0] != envelope[1]
     marker_observed = bool(timestamped_lines and follow_window_verified)
     preparation = bool((changes and changes["total"]) or markers)
     qualified = bool(
@@ -561,6 +596,8 @@ def compile_preparation_evidence(
             "observed" if marker_observed and not unattributed else "not_observable"
         ),
         "in_window_markers": dict(markers),
+        "marker_lines_with_timestamp_uncertainty": uncertain_markers,
+        "marker_timestamp_policy": "Original byte order; suffix-min/prefix-max CRI envelope. Any overlap with the workload window counts, without a skew tolerance.",
         "unattributed_marker_lines": unattributed,
         "raw_log_provenance": log_provenance,
         "raw_log_capture_window_verified": capture_window_verified,
@@ -2043,7 +2080,7 @@ def analyze(roots, catalog_path=None):
         for row in rows
     ]
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "runs": public_rows,
         "aggregates": aggregates,
         "catalog_status": catalog["status"],
