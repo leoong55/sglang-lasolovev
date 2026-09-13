@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import sys
 import tempfile
 import threading
@@ -19,6 +20,80 @@ SPEC.loader.exec_module(benchmark)
 
 
 class BenchmarkContractTests(unittest.TestCase):
+    def test_long_smoke_tokenizes_concatenated_text_before_exact_roundtrip_slice(self):
+        class BoundaryMergingTokenizer:
+            def __init__(self, trim_last=False):
+                self.parts, self.vocabulary = [], {}
+                self.trim_last = trim_last
+
+            def encode(self, text, add_special_tokens=False):
+                result = []
+                # Leading spaces merge into the following word, whereas a
+                # trailing isolated space is its own token, as with BPE.
+                for part in re.findall(r" ?[A-Za-z]+|[. ]", text):
+                    if part not in self.vocabulary:
+                        self.vocabulary[part] = len(self.parts)
+                        self.parts.append(part)
+                    result.append(self.vocabulary[part])
+                return result
+
+            def decode(self, ids):
+                if self.trim_last:
+                    ids = ids[:-1]
+                return "".join(self.parts[index] for index in ids)
+
+        tokenizer = BoundaryMergingTokenizer()
+        fragment = tokenizer.encode(
+            "The benchmark verifies long context model execution. "
+        )
+        old_text = tokenizer.decode((fragment * (75000 // len(fragment) + 1))[:75000])
+        self.assertLess(len(tokenizer.encode(old_text)), 74000)
+        for tokenizer in (tokenizer, BoundaryMergingTokenizer(trim_last=True)):
+            with (
+                self.subTest(trim_last=tokenizer.trim_last),
+                patch.dict(
+                    sys.modules,
+                    {
+                        "transformers": SimpleNamespace(
+                            AutoTokenizer=SimpleNamespace(
+                                from_pretrained=lambda *args, **kwargs: tokenizer
+                            )
+                        )
+                    },
+                ),
+            ):
+                text, metadata = benchmark.build_long_smoke_input("/model")
+            self.assertEqual(len(tokenizer.encode(text)), 75000)
+            self.assertEqual(metadata["input_tokens_before_chat_template"], 75000)
+            self.assertEqual(
+                metadata["sha256"], hashlib.sha256(text.encode()).hexdigest()
+            )
+            self.assertEqual(
+                metadata["roundtrip_adjustment_attempts"],
+                2 if tokenizer.trim_last else 1,
+            )
+
+    def test_long_smoke_rejects_unrecoverable_roundtrip_before_returning_input(self):
+        class BrokenTokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return [1] if text == "broken" else [1] * max(1, len(text))
+
+            def decode(self, ids):
+                return "broken"
+
+        with patch.dict(
+            sys.modules,
+            {
+                "transformers": SimpleNamespace(
+                    AutoTokenizer=SimpleNamespace(
+                        from_pretrained=lambda *args, **kwargs: BrokenTokenizer()
+                    )
+                )
+            },
+        ):
+            with self.assertRaisesRegex(RuntimeError, "required 74000..76000"):
+                benchmark.build_long_smoke_input("/model")
+
     def command(self, kind):
         return benchmark.build_command(
             kind,
@@ -555,7 +630,13 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
 
         class Tokenizer:
             def encode(self, text, add_special_tokens=False):
-                return [1] * (75000 if text == "long smoke input" else 1)
+                return [1] * (
+                    75000
+                    if text == "long smoke input"
+                    else text.count(
+                        "The benchmark verifies long context model execution. "
+                    )
+                )
 
             def decode(self, ids):
                 if len(ids) != 75000:
@@ -721,7 +802,13 @@ class RecorderIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         class SlowTokenizer:
             def encode(self, text, add_special_tokens=False):
-                return [1] * (75000 if text == "long smoke input" else 1)
+                return [1] * (
+                    75000
+                    if text == "long smoke input"
+                    else text.count(
+                        "The benchmark verifies long context model execution. "
+                    )
+                )
 
             def decode(self, ids):
                 if len(ids) != 75000:
