@@ -51,7 +51,13 @@ def resources(cpu, memory, gpu=False):
 
 
 def configmap():
-    files = ["benchmark.py", "export.py", "supervise.py", "preflight.py"]
+    files = [
+        "benchmark.py",
+        "dataset_catalog.py",
+        "export.py",
+        "supervise.py",
+        "preflight.py",
+    ]
     data = {name: (ROOT / name).read_text() for name in files}
     digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
     metadata = meta("glm53-topology-scripts-" + digest[:20], "scripts")

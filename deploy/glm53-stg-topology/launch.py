@@ -114,6 +114,11 @@ def make_launch(profile, model_path, hicache=False, port=8080, environ=None):
         "--enable-metrics",
         "--enable-cache-report",
         "--enable-metrics-for-all-schedulers",
+        "--log-requests",
+        "--log-requests-level",
+        "0",
+        "--log-requests-format",
+        "json",
     ]
     if profile == "pp2":
         command += ["--pp-max-micro-batch-size", "24", "--pp-async-batch-depth", "0"]

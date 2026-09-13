@@ -115,6 +115,11 @@ so warmup requests cannot be mistaken for measured completions. Neither change
 alters prompts, request order, RNG state, temperature, or thinking settings.
 
 Startup, correctness probes and JIT preparation are outside measured runs.
+The checkpoint's chat template opens `<think>` even when `enable_thinking=false`.
+The short correctness probe therefore sets `enable_thinking=true` so the `glm45`
+parser separates reasoning from the final answer. It still requires exact nonce
+content and `finish_reason=stop`, without stripping reasoning tags. This probe
+setting does not change the 400-request short benchmark's sampling settings.
 Each repetition has a short run, a long run after cache flush (followed by the
 original single-request warmup), and an immediate repeated long run without
 flush. Label these `cold` and `warm`; cold does not mean radix is disabled.
@@ -124,6 +129,21 @@ to the internal Service without altering prompts or sampling. It preserves
 per-request completion usage, finish reasons and cache observability, which
 vLLM's detailed report alone does not reliably expose. It is identical for all
 profiles and is never published as a cluster/external service.
+
+Before each benchmark suite, the supervisor builds an offline metadata-only
+catalog of the seeded long dataset using the same vLLM/tokenizer. It saves
+`dataset-catalog.json` and its SHA256 in provenance before starting the measured
+vLLM subprocesses; their RNG state is independent. The catalog identifies
+prefix groups and exact request-body hashes without storing prompts.
+Telemetry includes native `prefill_effective_tokens` and `load_back_tokens`
+counters for observing host-cache activity.
+
+The launcher also enables native JSON request logging at level 0. Finished
+events retain request IDs, DP rank and cached-token metadata while excluding
+prompt/output text and token IDs. The analyzer joins recorder response IDs to
+these native IDs and verifies exact catalog body hashes before assigning long
+requests to prefix groups. Missing fields or incomplete joins remain
+unobservable; per-group cache totals alone do not prove prefix placement.
 
 Keep raw vLLM output, request metadata, server-info, metric time series,
 GPU/RAM telemetry, manifest, source commit, image IDs, pod UID, and timestamps.
@@ -138,6 +158,20 @@ just one maximum count. Missing observer data is an evidence limitation.
 HiCache is judged separately for capacity, correctness, cold/warm latency and
 throughput. Historical CP/DCP numbers from the other cluster are reference-only.
 About2000 outputtok/s is an investigation target, not a promised PASS criterion.
+
+After exporting the Job results, generate the publishable aggregate locally:
+
+```bash
+python3 deploy/glm53-stg-topology/analyze_results.py \
+  --root /absolute/path/runs/s0913a \
+  --catalog /absolute/path/runs/s0913a/results/RUN_ID/dataset-catalog.json \
+  --output /absolute/path/aggregate.json
+```
+
+Replace `RUN_ID` with the exported suite directory. Catalog generation makes no
+HTTP requests. Keep the catalog, raw logs, requests and infrastructure evidence
+local; publish only the analyzer's allowlisted aggregate, which excludes raw
+request IDs, prompts, credentials, host addresses and GPU/pod identifiers.
 
 ## Local verification
 

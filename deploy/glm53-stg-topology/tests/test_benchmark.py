@@ -1,10 +1,14 @@
 import asyncio
+import hashlib
 import importlib.util
+import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 SPEC = importlib.util.spec_from_file_location(
     "benchmark", Path(__file__).parents[1] / "benchmark.py"
@@ -274,6 +278,181 @@ class BenchmarkContractTests(unittest.TestCase):
                 "internal_states": [{"admin_api_key": "[REDACTED]"}],
             },
         )
+
+    def test_host_cache_counters_survive_telemetry_filter(self):
+        counters = [
+            'sglang:prefill_effective_tokens_total{dp_rank="0",source="host"} 60000',
+            'sglang:load_back_tokens_total{dp_rank="0"} 60000',
+        ]
+        text = "\n".join(counters + ['unrelated:large_bucket{le="1000"} 99'])
+        self.assertEqual(benchmark.select_metrics(text), counters)
+
+    def test_suite_catalog_is_saved_offline_with_exact_file_hash_and_no_payload_log(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as folder:
+            args = SimpleNamespace(
+                mode="suite", results_dir=Path(folder), tokenizer="/model/weights"
+            )
+            payload = {
+                "schema_version": 1,
+                "samples": [{"sample_index": 0, "request_body_sha256": "a" * 64}],
+            }
+
+            def build(path):
+                self.assertEqual(path, Path("/model/weights"))
+                print("suppressed tokenizer or catalog details")
+                return payload
+
+            builder = Mock(side_effect=build)
+            output = io.StringIO()
+            with (
+                patch.dict(
+                    sys.modules, {"dataset_catalog": SimpleNamespace(build=builder)}
+                ),
+                patch.dict(benchmark.os.environ, {}, clear=False),
+                patch("sys.stdout", output),
+            ):
+                provenance = benchmark.prepare_dataset_catalog(args)
+                self.assertEqual(benchmark.os.environ["HF_HUB_OFFLINE"], "1")
+                self.assertEqual(benchmark.os.environ["TRANSFORMERS_OFFLINE"], "1")
+            builder.assert_called_once_with(Path("/model/weights"))
+            path = Path(folder) / "dataset-catalog.json"
+            self.assertEqual(json.loads(path.read_text()), payload)
+            self.assertEqual(
+                provenance["dataset_catalog_sha256"],
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+            self.assertNotIn("sample_index", output.getvalue())
+            self.assertNotIn("suppressed", output.getvalue())
+            with self.assertRaisesRegex(RuntimeError, "overwrite"):
+                benchmark.prepare_dataset_catalog(args)
+
+    def test_smoke_skips_offline_dataset_generation(self):
+        builder = Mock(
+            side_effect=AssertionError("Smoke must not generate the dataset")
+        )
+        with patch.dict(
+            sys.modules, {"dataset_catalog": SimpleNamespace(build=builder)}
+        ):
+            self.assertEqual(
+                benchmark.prepare_dataset_catalog(SimpleNamespace(mode="smoke")), {}
+            )
+        builder.assert_not_called()
+
+
+class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
+    async def check_smoke(self, response_mode="separated"):
+        calls = []
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            def raise_for_status(self):
+                pass
+
+            async def json(self):
+                return self.payload
+
+        class Session:
+            def post(self, url, json):
+                calls.append(json)
+                if len(calls) == 1:
+                    nonce = json["messages"][0]["content"].removeprefix(
+                        "Reply with exactly "
+                    )
+                    # Model behavior: the checkpoint always emits reasoning.
+                    # Only an enabled parser separates it from final content.
+                    separated = json["chat_template_kwargs"]["enable_thinking"]
+                    content = nonce if separated else f"<think>reasoning</think>{nonce}"
+                    reason = "stop"
+                    if response_mode == "raw_tags":
+                        content = f"<think>reasoning</think>{nonce}"
+                    elif response_mode == "wrong_nonce":
+                        content = nonce + " extra"
+                    elif response_mode == "reasoning_only":
+                        content = ""
+                    elif response_mode == "length":
+                        reason = "length"
+                    return Response(
+                        {
+                            "choices": [
+                                {
+                                    "finish_reason": reason,
+                                    "message": {
+                                        "content": content,
+                                        "reasoning_content": "Reasoning kept separately.",
+                                    },
+                                }
+                            ]
+                        }
+                    )
+                return Response(
+                    {
+                        "choices": [{"finish_reason": "length"}],
+                        "usage": {"completion_tokens": 16, "prompt_tokens": 75012},
+                    }
+                )
+
+        class Tokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return [1] * (75000 if text == "long smoke input" else 1)
+
+            def decode(self, ids):
+                if len(ids) != 75000:
+                    raise AssertionError("Long smoke must retain its 75k input")
+                return "long smoke input"
+
+        transformers = SimpleNamespace(
+            AutoTokenizer=SimpleNamespace(
+                from_pretrained=lambda *args, **kwargs: Tokenizer()
+            )
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            args = SimpleNamespace(
+                results_dir=Path(folder),
+                base_url="http://internal:8080",
+                tokenizer="/model",
+            )
+            with (
+                patch.dict(sys.modules, {"transformers": transformers}),
+                patch.object(benchmark, "snapshot", new_callable=AsyncMock),
+                patch.object(benchmark, "flush_cache", new_callable=AsyncMock) as flush,
+            ):
+                if response_mode == "separated":
+                    await benchmark.smoke(Session(), args)
+                    self.assertEqual(len(calls), 2)
+                    self.assertIs(
+                        calls[0]["chat_template_kwargs"]["enable_thinking"], True
+                    )
+                    saved = json.loads((Path(folder) / "smoke/short.json").read_text())
+                    self.assertEqual(
+                        saved["choices"][0]["message"]["reasoning_content"],
+                        "Reasoning kept separately.",
+                    )
+                    flush.assert_awaited_once()
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "exact-nonce/finish_reason=stop"
+                    ):
+                        await benchmark.smoke(Session(), args)
+                    self.assertEqual(len(calls), 1)
+                    flush.assert_not_awaited()
+
+    async def test_smoke_accepts_separate_reasoning_with_exact_nonce_and_stop(self):
+        await self.check_smoke()
+
+    async def test_smoke_rejects_unparsed_tags_wrong_content_or_nonstop_finish(self):
+        for mode in ("raw_tags", "wrong_nonce", "reasoning_only", "length"):
+            with self.subTest(mode=mode):
+                await self.check_smoke(mode)
 
 
 @unittest.skipUnless(

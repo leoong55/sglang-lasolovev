@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import importlib.metadata
+import io
 import json
 import os
 import re
@@ -66,6 +68,8 @@ METRIC_PREFIXES = (
     "sglang:gpu_memory",
     "sglang:gpu_utilization",
     "sglang:retract",
+    "sglang:prefill_effective_tokens",
+    "sglang:load_back_tokens",
 )
 
 
@@ -756,7 +760,9 @@ async def smoke(session: Any, args: argparse.Namespace) -> None:
         "messages": [{"role": "user", "content": f"Reply with exactly {nonce}"}],
         "max_completion_tokens": 128,
         "temperature": 0,
-        "chat_template_kwargs": {"enable_thinking": False},
+        # This checkpoint's template always opens <think>. Keep glm45 reasoning
+        # extraction enabled so only the final answer is checked against nonce.
+        "chat_template_kwargs": {"enable_thinking": True},
     }
     async with session.post(
         args.base_url + "/v1/chat/completions", json=body
@@ -822,6 +828,33 @@ async def smoke(session: Any, args: argparse.Namespace) -> None:
     )
 
 
+def prepare_dataset_catalog(args: argparse.Namespace) -> dict[str, Any]:
+    if args.mode == "smoke":
+        return {}
+    path = args.results_dir / "dataset-catalog.json"
+    if path.exists():
+        raise RuntimeError("Refusing to overwrite an existing dataset catalog")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["VLLM_NO_USAGE_STATS"] = "1"
+    print(json.dumps({"event": "dataset_catalog_started"}), flush=True)
+    # Generate offline in the supervisor before launching any measured vLLM
+    # subprocess. Each subprocess seeds its own RNG, independently of this work.
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+        io.StringIO()
+    ):
+        from dataset_catalog import build
+
+        catalog = build(Path(args.tokenizer))
+    write_json(path, catalog)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    print(json.dumps({"event": "dataset_catalog_saved", "sha256": digest}), flush=True)
+    return {
+        "dataset_catalog_sha256": digest,
+        "dataset_catalog_schema_version": catalog["schema_version"],
+    }
+
+
 async def run(args: argparse.Namespace) -> int:
     from aiohttp import ClientSession, ClientTimeout, TCPConnector, web
 
@@ -833,6 +866,7 @@ async def run(args: argparse.Namespace) -> int:
     version = importlib.metadata.version("vllm")
     if version.split("+")[0] != "0.23.0":
         raise RuntimeError(f"Expected pinned vLLM 0.23.0, found {version}")
+    catalog_provenance = prepare_dataset_catalog(args)
     write_json(
         provenance_path,
         {
@@ -852,6 +886,7 @@ async def run(args: argparse.Namespace) -> int:
             "short_sampling": "natural EOS restored after vLLM 0.23.0 random override; temperature/thinking omitted",
             "cold_definition": "flush before vLLM initial ready check and explicit warmup",
             "server_pp_c40": "requires separate unique-rid observer evidence from serving logs",
+            **catalog_provenance,
         },
     )
     async with ClientSession(
