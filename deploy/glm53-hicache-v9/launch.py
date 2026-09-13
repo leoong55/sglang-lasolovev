@@ -35,6 +35,7 @@ def check_profile(argv):
     p.add_argument("--disable-shared-experts-fusion", action="store_true", required=True)
     p.add_argument("--dsa-prefill-backend", required=True)
     p.add_argument("--moe-a2a-backend", required=True)
+    p.add_argument("--moe-runner-backend", choices=["auto", "cutlass", "humming"], default="auto")
     p.add_argument("--cuda-graph-backend-prefill", required=True, choices=["breakable", "disabled"])
     p.add_argument("--cuda-graph-bs-prefill", nargs="+", type=int)
     p.add_argument("--cuda-graph-max-bs-prefill", type=int)
@@ -115,6 +116,11 @@ def check_profile(argv):
         conflicts = {"--enforce-disable-flashinfer-allreduce-fusion", "--enable-deterministic-inference"}
         if any(x.split("=", 1)[0] in conflicts for x in argv):
             p.error("Remove conflicting deterministic/disabled/global-allreduce options for the CP fusion A/B")
+    if args.moe_runner_backend == "humming":
+        if args.speculative_algorithm:
+            p.error("The W4 MoE backend comparison requires speculation off")
+        if args.glm53_cp_decode_fusion != "off":
+            p.error("Keep --glm53-cp-decode-fusion off for the W4 MoE comparison")
     return args
 
 
@@ -169,6 +175,7 @@ if __name__ == "__main__":
     configure_runtime_env(profile)
     argv = runtime_argv(argv)
     print(f"glm53: speculation={profile.speculative_algorithm or 'off'}; "
+          f"moe-backend={'cutlass' if profile.moe_runner_backend == 'auto' else profile.moe_runner_backend}; "
           f"cp-decode-fusion={profile.glm53_cp_decode_fusion}; "
           f"hicache={profile.enable_hierarchical_cache}; max-running={profile.max_running_requests}; "
           f"bounded-draft-window={profile.glm53_draft_cache_window}; "

@@ -11,6 +11,7 @@ from pathlib import Path
 BASE = "0bcd822377da7b5718e674eaf9c870d349424dd1"
 PREVIOUS = "6526bef6bf959e203a0cc23dacdb2553f81c1e3e"
 PR_HEAD = "c6aeb8b9d9128b816777e2b64cbf6603344e8fe1"
+V98 = "2aa3716d0e9f4d55dca0e5c31dbef2b8c55a3dcf"
 
 
 def main():
@@ -72,6 +73,9 @@ def main():
             )
         )
     (output / "runtime.patch").write_bytes(patch)
+    (output / "v9.8-to-v9.9.patch").write_bytes(
+        git("diff", "--binary", V98, "--", "python/sglang", str(source.relative_to(repo)))
+    )
     (output / "v8-to-hicache.patch").write_bytes(
         git(
             "diff",
@@ -92,7 +96,11 @@ def main():
                 upstream_pr_head=PR_HEAD,
                 gpu_validated=False,
                 image_built_here=False,
-                profile="glm53-hicache-v9.8",
+                profile="glm53-hicache-v9.9",
+                moe_backend_default="cutlass",
+                moe_backend_opt_in="humming",
+                humming_version="0.1.12",
+                previous_working_commit=V98,
             ),
             indent=2,
         )
