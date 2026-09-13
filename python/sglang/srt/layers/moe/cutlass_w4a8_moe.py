@@ -124,6 +124,12 @@ def cutlass_w4a8_moe(
     n = w2_q.size(2) * 2  # w2_q is transposed and packed
     topk = topk_ids.size(1)
 
+    from sglang.srt.layers.moe.glm53_cutlass import gemm, select_pair
+
+    gate_variant, down_variant = select_pair(
+        m, k, n, num_local_experts, get_parallel().moe_ep_size, topk
+    )
+
     if apply_router_weight_on_input:
         assert topk == 1, "apply_router_weight_on_input is only implemented for topk=1"
 
@@ -178,7 +184,8 @@ def cutlass_w4a8_moe(
     c1 = torch.empty((m * topk, n * 2), device=device, dtype=torch.bfloat16)
     c2 = torch.empty((m * topk, k), device=device, dtype=torch.bfloat16)
 
-    cutlass_w4a8_moe_mm(
+    gemm(
+        gate_variant,
         c1,
         gateup_input,
         w1_q,
@@ -208,7 +215,8 @@ def cutlass_w4a8_moe(
             c1, intermediate_q, a2_scale.float(), expert_offsets[-1:], m * topk, n
         )
 
-    cutlass_w4a8_moe_mm(
+    gemm(
+        down_variant,
         c2,
         intermediate_q,
         w2_q,

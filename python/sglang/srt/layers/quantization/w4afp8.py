@@ -263,6 +263,9 @@ class W4AFp8MoEMethod(FusedMoEMethodBase):
         return
 
     def process_weights_after_loading(self, layer: Module) -> None:
+        from sglang.srt.layers.moe.glm53_cutlass import prepare
+
+        prepare()
         dtype = torch.bfloat16
         device = layer.w2_weight.device
 
