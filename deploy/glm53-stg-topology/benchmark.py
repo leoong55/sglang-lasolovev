@@ -310,7 +310,7 @@ def select_metrics(text: str) -> list[str]:
 
 
 def dp_activity(payload: Any, profile: str) -> dict[str, Any]:
-    """Never add TP/PP replicas. Only a complete unique set of DP leaders counts."""
+    """Summarize independent DP slots; their sum is not simultaneous activity."""
     if profile == "pp2":
         return {
             "observable": False,
@@ -326,8 +326,10 @@ def dp_activity(payload: Any, profile: str) -> dict[str, Any]:
         return {"observable": False, "reason": "Missing running-request counter"}
     return {
         "observable": True,
-        "running": sum(row["num_running_reqs"] for row in rows),
-        "queued": sum(row.get("num_waiting_reqs", 0) for row in rows),
+        "qualification": "diagnostic_only",
+        "scope": "Independent DP-slot snapshots; no shared logical step or simultaneous concurrency is established.",
+        "diagnostic_running_sum": sum(row["num_running_reqs"] for row in rows),
+        "diagnostic_queued_sum": sum(row.get("num_waiting_reqs", 0) for row in rows),
         "groups": {str(row["dp_rank"]): row["num_running_reqs"] for row in rows},
     }
 
@@ -679,19 +681,31 @@ def activity_verdict(
             if start <= point["timestamp"] <= end and point.get("activity", {}).get(
                 "observable"
             ):
-                points.append(point["activity"]["running"])
+                # Read older raw telemetry only as the same slot-sum diagnostic.
+                value = point["activity"].get(
+                    "diagnostic_running_sum", point["activity"].get("running")
+                )
+                if (
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and value >= 0
+                ):
+                    points.append(value)
     return {
-        "server_c40_confirmed": bool(points and max(points) >= 40),
-        "server_running_peak": max(points, default=None),
-        "server_activity_samples": len(points),
-        "server_samples_running_at_least_40": sum(value >= 40 for value in points),
+        # Both profiles require offline measured-ID analysis of serving logs.
+        # HTTP client concurrency and independent /loads slots cannot supply it.
+        "server_c40_confirmed": False,
+        "capacity_status": "C40_UNPROVEN",
+        "dp_load_diagnostics": {
+            "peak_independent_slot_sum": max(points, default=None),
+            "samples": len(points),
+            "samples_slot_sum_at_least_40": sum(value >= 40 for value in points),
+            "scope": "Independent DP-slot snapshots only; not simultaneous C40 evidence.",
+        },
         "server_activity_source": (
-            "serving PP observer logs required"
+            "serving PP measured-ID observer log analysis required"
             if profile == "pp2"
-            else "/v1/loads unique DP leaders"
-        ),
-        "capacity_status": (
-            "C40_OBSERVED" if points and max(points) >= 40 else "C40_UNPROVEN"
+            else "serving DPA shared-forward measured-ID observer log analysis required"
         ),
     }
 

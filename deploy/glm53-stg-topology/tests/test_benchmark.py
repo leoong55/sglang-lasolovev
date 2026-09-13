@@ -310,13 +310,16 @@ class BenchmarkContractTests(unittest.TestCase):
                 {"dp_rank": 1, "num_running_reqs": 19},
             ]
         }
-        self.assertEqual(benchmark.dp_activity(data, "dpa2")["running"], 40)
+        diagnostic = benchmark.dp_activity(data, "dpa2")
+        self.assertEqual(diagnostic["diagnostic_running_sum"], 40)
+        self.assertEqual(diagnostic["qualification"], "diagnostic_only")
+        self.assertNotIn("running", diagnostic)
         self.assertFalse(benchmark.dp_activity(data, "dpa4")["observable"])
         data["loads"][1]["dp_rank"] = 0
         self.assertFalse(benchmark.dp_activity(data, "dpa2")["observable"])
         self.assertFalse(benchmark.dp_activity(data, "pp2")["observable"])
 
-    def test_activity_excludes_warmup_and_never_infers_pp_concurrency(self):
+    def test_activity_excludes_warmup_and_never_confirms_raw_concurrency(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "telemetry.jsonl"
             for timestamp, count in ((1, 48), (3, 38), (4, 40), (6, 48)):
@@ -324,13 +327,23 @@ class BenchmarkContractTests(unittest.TestCase):
                     path,
                     {
                         "timestamp": timestamp,
-                        "activity": {"observable": True, "running": count},
+                        "activity": {
+                            "observable": True,
+                            "diagnostic_running_sum": count,
+                        },
                     },
                 )
             verdict = benchmark.activity_verdict(path, "dpa2", 2, 5)
-            self.assertEqual(verdict["server_running_peak"], 40)
-            self.assertEqual(verdict["server_activity_samples"], 2)
-            self.assertTrue(verdict["server_c40_confirmed"])
+            self.assertEqual(
+                verdict["dp_load_diagnostics"]["peak_independent_slot_sum"], 40
+            )
+            self.assertEqual(verdict["dp_load_diagnostics"]["samples"], 2)
+            self.assertEqual(
+                verdict["dp_load_diagnostics"]["samples_slot_sum_at_least_40"], 1
+            )
+            self.assertFalse(verdict["server_c40_confirmed"])
+            self.assertEqual(verdict["capacity_status"], "C40_UNPROVEN")
+            self.assertNotIn("server_running_peak", verdict)
             self.assertEqual(
                 benchmark.activity_verdict(path, "dpa2", 2, 3)["capacity_status"],
                 "C40_UNPROVEN",
@@ -338,6 +351,45 @@ class BenchmarkContractTests(unittest.TestCase):
             self.assertFalse(
                 benchmark.activity_verdict(path, "pp2", 2, 5)["server_c40_confirmed"]
             )
+
+    def test_skewed_and_legacy_high_slot_sums_are_diagnostics_for_every_dpa_profile(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "telemetry.jsonl"
+            for profile in ("dpa2", "dpa4", "dpa8"):
+                size = int(profile[3:])
+                loads = [
+                    {
+                        "dp_rank": rank,
+                        "timestamp": 10 + rank,
+                        "num_running_reqs": 40 // size,
+                    }
+                    for rank in range(size)
+                ]
+                activity = benchmark.dp_activity(loads, profile)
+                path.write_text("")
+                benchmark.append_json(
+                    path, {"timestamp": 18, "loads": loads, "activity": activity}
+                )
+                # Old telemetry's unqualified 'running' field must not resurrect PASS.
+                benchmark.append_json(
+                    path,
+                    {
+                        "timestamp": 19,
+                        "activity": {"observable": True, "running": 1000},
+                    },
+                )
+                verdict = benchmark.activity_verdict(path, profile, 0, 20)
+                self.assertEqual(
+                    verdict["dp_load_diagnostics"]["peak_independent_slot_sum"], 1000
+                )
+                self.assertFalse(verdict["server_c40_confirmed"])
+                self.assertEqual(verdict["capacity_status"], "C40_UNPROVEN")
+            pp = benchmark.activity_verdict(path, "pp2", 0, 20)
+            self.assertEqual(pp["dp_load_diagnostics"]["samples"], 0)
+            self.assertFalse(pp["server_c40_confirmed"])
+            self.assertEqual(pp["capacity_status"], "C40_UNPROVEN")
 
     def test_redacts_secrets_without_dropping_resolved_config(self):
         self.assertEqual(
