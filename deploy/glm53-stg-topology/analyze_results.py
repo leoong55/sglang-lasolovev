@@ -166,6 +166,35 @@ def measurement_eligible(row):
     )
 
 
+def mechanical_preparation_exclusion_reasons(row):
+    """Apply only the predeclared compilation rule, never hide missing evidence.
+
+    Intent remains measurement. All other checks must pass before an observed
+    preparation attempt can be omitted from the comparison denominator.
+    """
+    compilation = row["compile_preparation"]
+    allowed = {
+        "compiler_artifacts_changed_during_child_attempt",
+        "warmup_markers_in_measured_window",
+    }
+    reasons = set(compilation["qualification_issues"])
+    if (
+        measurement_provenance_verified(row)
+        and row["functional_valid"]
+        and row["orchestration_valid"]
+        and row["server_c40_observed"]
+        and row["_dataset"] is not None
+        and row["_node"] is not None
+        and compilation["inventory_status"] == "observed"
+        and compilation["marker_status"] == "observed"
+        and compilation["preparation_evidence"]
+        and reasons
+        and reasons <= allowed
+    ):
+        return sorted(reasons)
+    return []
+
+
 COMPILE_MARKERS = {
     "deepgemm_session": "Entering DeepGEMM JIT Pre-Compile session",
     "deepgemm_compile_attempt": "Try DeepGEMM JIT Compiling for",
@@ -1243,6 +1272,15 @@ def aggregate(rows):
         grouped[key].append(row)
     result = []
     for key, group in sorted(grouped.items(), key=lambda pair: str(pair[0])):
+        excluded = [
+            row for row in group if mechanical_preparation_exclusion_reasons(row)
+        ]
+        comparison_count = len(group) - len(excluded)
+        exclusion_reasons = Counter(
+            reason
+            for row in excluded
+            for reason in mechanical_preparation_exclusion_reasons(row)
+        )
         valid = [
             row
             for row in group
@@ -1276,12 +1314,16 @@ def aggregate(rows):
                     row["compile_preparation"]["comparison_qualified"] for row in group
                 ),
                 "repetitions": len(group),
+                "comparison_repetitions": comparison_count,
+                "mechanically_excluded_preparation_repetitions": len(excluded),
+                "mechanical_preparation_exclusion_reasons": dict(exclusion_reasons),
                 "valid_repetitions": len(valid),
                 "functional_valid_repetitions": sum(
                     row["functional_valid"] for row in group
                 ),
                 "all_functional_valid": all(row["functional_valid"] for row in group),
-                "all_comparison_qualified": len(valid) == len(group),
+                "all_comparison_qualified": bool(comparison_count)
+                and len(valid) == comparison_count,
                 "all_server_c40_observed": all(
                     row["server_c40_observed"] for row in group
                 ),
@@ -1307,8 +1349,17 @@ def dpa_selection(rows, aggregates, attempts):
         for row in rows
         if row["cache_mode"] == "baseline" and row["workload"].startswith("long")
     ]
+    failed_attempts = Counter(
+        attempt["profile"]
+        for attempt in attempts
+        if attempt["purpose"] == "measurement"
+        and attempt["phase"] in {"baseline", "repeat"}
+        and attempt["status"] != "measured"
+    )
     candidates = []
     for profile in ("dpa2", "dpa4", "dpa8"):
+        if failed_attempts[profile]:
+            continue
         groups = [
             group
             for group in aggregates
@@ -1393,6 +1444,7 @@ def dpa_selection(rows, aggregates, attempts):
             )
         ),
         "all_dpa_profiles_attempted": all_screened,
+        "blocking_failed_measurement_attempts_by_profile": dict(failed_attempts),
         "same_node_source_image_dataset": comparable,
         "same_node_serving_tooling_configmap_dataset": comparable,
         "identity_comparability_fields": [
@@ -1534,6 +1586,10 @@ def analyze(roots, catalog_path=None):
                     ),
                 }
             )
+    for row in rows:
+        reasons = mechanical_preparation_exclusion_reasons(row)
+        row["comparison_excluded_as_observed_preparation"] = bool(reasons)
+        row["comparison_preparation_exclusion_reasons"] = reasons
     aggregates = aggregate(rows)
     selection = dpa_selection(rows, aggregates, attempts)
     if issues["preparation_declaration_timing_unverified"] and rows:
@@ -1566,6 +1622,16 @@ def analyze(roots, catalog_path=None):
             "measurement_workloads_with_preparation_evidence": sum(
                 row["compile_preparation"]["preparation_evidence"] for row in rows
             ),
+            "mechanically_excluded_measurement_workloads": sum(
+                row["comparison_excluded_as_observed_preparation"] for row in rows
+            ),
+            "mechanical_exclusion_reasons": dict(
+                Counter(
+                    reason
+                    for row in rows
+                    for reason in row["comparison_preparation_exclusion_reasons"]
+                )
+            ),
             "measurement_workloads_compile_not_observable": sum(
                 row["compile_preparation"]["inventory_status"] == "not_observable"
                 for row in rows
@@ -1597,7 +1663,7 @@ def analyze(roots, catalog_path=None):
                 }
                 for row in preparation_rows
             ],
-            "scope": "Explicit preparation declarations only; excluded before all aggregate, affinity comparison and selection operations. Counts/status are retained without performance ranking.",
+            "scope": "Explicit preparation declarations are separated before aggregation. Mechanically observed compilation may additionally exclude an otherwise fully verified measurement attempt from comparison; its original measurement intent, result and exclusion reasons remain in runs. Missing evidence or failed measurements are never excluded by that rule.",
         },
         "evidence_issues": dict(issues),
         "dpa_selection": selection,

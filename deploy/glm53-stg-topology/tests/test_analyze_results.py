@@ -927,6 +927,171 @@ class AnalyzerTests(unittest.TestCase):
         self.assertTrue(group["all_functional_valid"])
         self.assertFalse(group["all_comparison_qualified"])
 
+    def mark_compiler_artifact_change(self, run, kind):
+        path = self.root / "results" / run / f"r01-{kind}/after-compile-cache.json"
+        snapshot = json.loads(path.read_text())
+        snapshot["files"] = [
+            {
+                "path": "triton/PRIVATE-COMPILE-ARTIFACT.bin",
+                "size": 123,
+                "mtime_ns": 20_000_000_000,
+            }
+        ]
+        self.write(path, snapshot)
+
+    def test_observed_compilation_then_clean_repeat_recovers_without_changing_intent(
+        self,
+    ):
+        for preparation_speed in (1, 9999):
+            with self.subTest(preparation_speed=preparation_speed):
+                self.campaign(profile="dpa2", throughput=500)
+                self.campaign(profile="dpa8", throughput=550)
+                run = self.campaign(profile="dpa4", throughput=preparation_speed)
+                for kind in ("long-cold", "long-warm"):
+                    self.mark_compiler_artifact_change(run, kind)
+                self.campaign(profile="dpa4", phase="repeat", throughput=600)
+                output = analysis.analyze([self.root])
+                self.assertEqual(output["dpa_selection"]["screening_candidate"], "dpa4")
+                original = [
+                    row
+                    for row in output["runs"]
+                    if row["profile"] == "dpa4" and row["phase"] == "baseline"
+                ]
+                self.assertEqual(len(original), 2)
+                self.assertTrue(
+                    all(row["purpose"] == "measurement" for row in original)
+                )
+                self.assertTrue(
+                    all(
+                        row["comparison_excluded_as_observed_preparation"]
+                        for row in original
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        row["metrics"]["output_throughput"] == preparation_speed
+                        for row in original
+                    )
+                )
+                self.assertEqual(
+                    output["preparation"][
+                        "mechanically_excluded_measurement_workloads"
+                    ],
+                    2,
+                )
+                self.assertEqual(
+                    output["preparation"]["mechanical_exclusion_reasons"],
+                    {"compiler_artifacts_changed_during_child_attempt": 2},
+                )
+                self.assertEqual(output["preparation"]["excluded_workloads"], 0)
+                for group in output["aggregates"]:
+                    if group["profile"] != "dpa4":
+                        continue
+                    self.assertEqual(group["repetitions"], 2)
+                    self.assertEqual(group["comparison_repetitions"], 1)
+                    self.assertEqual(group["valid_repetitions"], 1)
+                    self.assertEqual(
+                        group["mechanically_excluded_preparation_repetitions"], 1
+                    )
+                    self.assertTrue(group["all_comparison_qualified"])
+                    self.assertTrue(group["all_functional_valid"])
+                    self.assertFalse(group["all_compilation_preparation_qualified"])
+                    self.assertEqual(
+                        group["metrics"]["output_throughput"]["median"], 600
+                    )
+                self.assertNotIn("PRIVATE-COMPILE-ARTIFACT", json.dumps(output))
+
+    def test_preparation_evidence_cannot_hide_failed_or_unobserved_measurement(self):
+        for deficiency in (
+            "missing_inventory",
+            "missing_markers",
+            "functional_error",
+            "missing_c40",
+            "identity_mismatch",
+            "missing_dataset",
+        ):
+            with self.subTest(deficiency=deficiency):
+                self.campaign(profile="dpa2", throughput=500)
+                self.campaign(profile="dpa8", throughput=550)
+                run = self.campaign(profile="dpa4", throughput=9999)
+                for kind in ("long-cold", "long-warm"):
+                    self.mark_compiler_artifact_change(run, kind)
+                self.campaign(profile="dpa4", phase="repeat", throughput=600)
+                directory = self.root / "results" / run / "r01-long-cold"
+                if deficiency == "missing_inventory":
+                    (directory / "before-compile-cache.json").unlink()
+                    (self.root / run / "server.log").write_text(
+                        "1970-01-01T00:00:20Z Try DeepGEMM JIT Compiling for PRIVATE\n"
+                    )
+                elif deficiency == "missing_markers":
+                    (self.root / run / "server.log").write_text("")
+                elif deficiency == "functional_error":
+                    path = directory / "vllm.json"
+                    value = json.loads(path.read_text())
+                    value["failed"] = 1
+                    self.write(path, value)
+                elif deficiency == "missing_c40":
+                    self.linefile(
+                        directory / "telemetry.jsonl",
+                        [self.dpa(i, "dpa4", count=36) for i in range(41)],
+                    )
+                elif deficiency == "identity_mismatch":
+                    path = directory.parent / "provenance.json"
+                    value = json.loads(path.read_text())
+                    value["tooling_commit"] = "e" * 40
+                    self.write(path, value)
+                else:
+                    path = directory / "requests.jsonl"
+                    records = list(analysis.json_lines(path))
+                    records[0].pop("request_sha256")
+                    self.linefile(path, records)
+                output = analysis.analyze([self.root])
+                cold = next(
+                    row
+                    for row in output["runs"]
+                    if row["profile"] == "dpa4"
+                    and row["phase"] == "baseline"
+                    and row["workload"] == "long-cold"
+                )
+                self.assertEqual(cold["purpose"], "measurement")
+                self.assertTrue(cold["compile_preparation"]["preparation_evidence"])
+                self.assertFalse(cold["comparison_excluded_as_observed_preparation"])
+                group = next(
+                    row
+                    for row in output["aggregates"]
+                    if row["profile"] == "dpa4" and row["workload"] == "long-cold"
+                )
+                self.assertEqual(group["comparison_repetitions"], 2)
+                self.assertEqual(
+                    group["mechanically_excluded_preparation_repetitions"], 0
+                )
+                self.assertFalse(group["all_comparison_qualified"])
+                self.assertNotEqual(
+                    output["dpa_selection"]["screening_candidate"], "dpa4"
+                )
+
+    def test_failed_measurement_without_verdict_blocks_profile_after_clean_repeat(self):
+        self.campaign(profile="dpa2", throughput=500)
+        self.campaign(profile="dpa8", throughput=550)
+        run = self.campaign(profile="dpa4", throughput=9999)
+        self.campaign(profile="dpa4", phase="repeat", throughput=600)
+        state_path = self.root / run / "run-state.json"
+        state = json.loads(state_path.read_text())
+        state.update(status="benchmark_failed", measurement_job_started=True)
+        self.write(state_path, state)
+        shutil.rmtree(self.root / "results" / run)
+        output = analysis.analyze([self.root])
+        self.assertEqual(output["dpa_selection"]["screening_candidate"], "dpa8")
+        self.assertEqual(
+            output["dpa_selection"]["blocking_failed_measurement_attempts_by_profile"],
+            {"dpa4": 1},
+        )
+        self.assertEqual(len(output["failed_profiles"]), 1)
+        self.assertEqual(output["failed_profiles"][0]["purpose"], "measurement")
+        self.assertEqual(
+            output["preparation"]["mechanically_excluded_measurement_workloads"], 0
+        )
+
     def test_untimed_cache_changes_are_not_claimed_as_timed_compilation(self):
         run = self.campaign()
         directory = self.root / "results" / run / "r01-long-cold"

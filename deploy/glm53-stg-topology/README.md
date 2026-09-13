@@ -164,6 +164,9 @@ Read-only inventories of compiler artifacts are taken before and after each
 workload, outside timed requests. Preserve DeepGEMM warmup log messages and any
 new or changed compiler artifacts. A timed attempt with further preparation is
 retained as preparation and repeated, independently of its performance result.
+Its original measurement intent remains recorded; only mechanically observed
+preparation with all other checks satisfied is excluded from comparison, so a
+clean repeat can qualify. Missing evidence and failed measurements remain blocking.
 Stable artifacts and absent warmup messages mean no compilation was observed;
 they are not proof that every in-memory JIT path is observable.
 
