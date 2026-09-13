@@ -278,6 +278,18 @@ HTTP requests. Keep the catalog, raw logs, requests and infrastructure evidence
 local; publish only the analyzer's allowlisted aggregate, which excludes raw
 request IDs, prompts, credentials, host addresses and GPU/pod identifiers.
 
+## Separate HiCache RAM gate
+
+Before HiCache, use the independent [RAM preflight](HICACHE_PREFLIGHT.md) to join
+completed baseline serving cgroup telemetry with a fresh whole-host RAM sample.
+The CPU Job reads the model PVC without modifying it, verifies the selected node,
+and binds its short-lived report to the exact serving manifest. It treats the
+32 GiB operational margin, actual KV plus DSA indexer allocation, native allocator
+admission bound, and configured 640 GiB serving limit as separate quantities.
+Missing evidence blocks admission; RAM PASS does not establish cache effectiveness
+or replace the existing smoke and benchmark checks. This helper does not modify
+the frozen benchmark or orchestrator and never applies cluster resources itself.
+
 ## Local verification
 
 ```bash
