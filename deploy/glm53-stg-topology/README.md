@@ -118,6 +118,33 @@ Select `dpaN` using long benchmark results and capacity evidence, not short
 throughput alone. If a profile cannot load or cannot sustain C40, report that
 boundary rather than silently lowering the concurrency or changing kernels.
 
+## Concurrent binary log collection
+
+Start this read-only auxiliary collector in another terminal before admission
+and measurements, using the orchestrator's same private campaign directory:
+
+```bash
+python3 deploy/glm53-stg-topology/collect_follow_logs.py \
+  --kubeconfig /absolute/private/inf-glm53-stg.kubeconfig \
+  --campaign-root /absolute/private/runs/CAMPAIGN_ID \
+  --phase baseline --expected-profiles 4
+```
+
+For the two finalists, use `--phase repeat --expected-profiles 2` or
+`--phase hicache --expected-profiles 2`. It follows one named serving container
+at a time through ordinary Kubernetes log GETs, without changing any workload.
+It preserves binary output, embedded CR characters, source snapshots and
+checksummed metadata in `server-follow.*` files; keep these artifacts private.
+
+Every connection has separate byte offsets and CRI timestamp bounds.
+Reconnects are never joined to claim continuity. An observed measurement
+window must fit inside one segment without framing errors; this establishes
+no observed transport interruption in that window, not infallible kubelet log
+retention. API and stream failures remain explicit in metadata and the exit
+status. The collector stops when all expected profile attempts are recorded
+and serving pods are gone. If stopping it manually, wait until experimental
+GPU pods have quiesced, then send Ctrl-C. It does not stop GPU workloads itself.
+
 ## CPU client validation
 
 `client_harness.py` runs the actual pinned vLLM client and checkpoint tokenizer

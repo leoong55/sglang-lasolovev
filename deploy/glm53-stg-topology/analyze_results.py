@@ -18,6 +18,7 @@ observed between snapshots. No interpolation proves concurrency between samples.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -202,6 +203,211 @@ COMPILE_MARKERS = {
     "deepgemm_memory_check": "Required memory for warmup:",
     "deepgemm_warmup_reduced": "reducing max_m",
 }
+# Filled with the reviewed raw collector revision; unknown implementations do
+# not establish the binary/LF framing contract merely by declaring its name.
+RAW_LOG_COLLECTOR_SHA256 = (
+    "3ad42aca033029bd6f127f0ad94692744049d6186d992c0915483e4761e1689a"
+)
+FOLLOW_LOG_COLLECTOR_SHA256 = (
+    "bf605777ae2fe8030fc443266e0a9807c64471fce1de30174d46b6b01ea35ec0"
+)
+
+
+def cri_timestamp(line):
+    token = line.split(maxsplit=1)[0] if line.strip() else ""
+    try:
+        date = datetime.fromisoformat(token.replace("Z", "+00:00"))
+        return date.timestamp() if date.tzinfo is not None else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def verified_follow_log(directory, state):
+    """Return private segment text separately from safe, verified provenance.
+
+    Never join reconnects. Segment bounds are independently reconstructed from
+    the hashed bytes; endpoint metadata alone cannot establish log continuity.
+    """
+    metadata = read_json(directory / "server-follow.meta.json")
+    issues = []
+    if (
+        metadata.get("schema_version") != 1
+        or metadata.get("format") != "kubectl-follow-timestamps-lf-v1"
+        or metadata.get("capture_mode") != "continuous_follow"
+        or metadata.get("container") != "sglang"
+    ):
+        issues.append("follow_log_format_not_verified")
+    if not state.get("pod_uid") or metadata.get("pod_uid") != state.get("pod_uid"):
+        issues.append("follow_log_pod_identity_not_verified")
+    try:
+        source = (directory / "server-follow.collector.py").read_bytes()
+        source_hash = hashlib.sha256(source).hexdigest()
+        if (
+            not FOLLOW_LOG_COLLECTOR_SHA256
+            or source_hash != FOLLOW_LOG_COLLECTOR_SHA256
+            or metadata.get("collector_sha256") != source_hash
+        ):
+            issues.append("follow_log_collector_source_not_verified")
+    except OSError:
+        issues.append("follow_log_collector_source_missing")
+    raw = b""
+    try:
+        raw = (directory / "server-follow.log").read_bytes()
+        if (
+            metadata.get("log_bytes") != len(raw)
+            or metadata.get("log_sha256") != hashlib.sha256(raw).hexdigest()
+        ):
+            issues.append("follow_log_bytes_not_verified")
+    except OSError:
+        issues.append("follow_log_missing")
+    segments = metadata.get("segments")
+    if not isinstance(segments, list) or not segments:
+        issues.append("follow_log_segments_missing")
+        segments = []
+    if not count(metadata.get("collection_errors")):
+        issues.append("follow_log_error_accounting_missing")
+    texts, safe_segments, cursor, seen_ids = [], [], 0, set()
+    for segment in segments:
+        if not isinstance(segment, dict):
+            issues.append("follow_log_segment_invalid")
+            continue
+        start, end = segment.get("byte_start"), segment.get("byte_end")
+        sid = segment.get("segment_id")
+        if (
+            not count(start)
+            or not count(end)
+            or start != cursor
+            or end < start
+            or end > len(raw)
+            or not count(sid)
+            or sid in seen_ids
+        ):
+            issues.append("follow_log_segment_byte_ranges_not_verified")
+            continue
+        cursor = end
+        seen_ids.add(sid)
+        segment_issues = []
+        try:
+            text = raw[start:end].decode("utf-8")
+        except UnicodeDecodeError:
+            text = ""
+            segment_issues.append("segment_encoding_invalid")
+        lines = text.split("\n")
+        partial = len(lines.pop().encode())
+        timestamps = [cri_timestamp(line) for line in lines]
+        unframed = sum(value is None for value in timestamps)
+        framed = [value for value in timestamps if value is not None]
+        regressions = sum(b < a for a, b in zip(framed, framed[1:]))
+        first, last = (framed[0], framed[-1]) if framed else (None, None)
+        if not framed:
+            segment_issues.append("segment_has_no_timestamped_records")
+        if partial or unframed or regressions:
+            segment_issues.append("segment_framing_or_clock_not_verified")
+        for key, expected in {
+            "first_cri_timestamp": first,
+            "last_cri_timestamp": last,
+            "records": len(lines),
+            "unframed_records": unframed,
+            "partial_line_bytes": partial,
+            "clock_regressions": regressions,
+        }.items():
+            if segment.get(key) != expected:
+                segment_issues.append("segment_metadata_does_not_match_bytes")
+                break
+        started, ended = segment.get("started_at"), segment.get("ended_at")
+        if not number(started) or (
+            ended is not None and (not number(ended) or ended < started)
+        ):
+            segment_issues.append("segment_transport_times_not_verified")
+        if (
+            segment.get("restart_count") != 0
+            or metadata.get("restart_count") != 0
+            or not isinstance(segment.get("container_id"), str)
+            or not segment["container_id"]
+            or segment["container_id"] != metadata.get("container_id")
+        ):
+            segment_issues.append("segment_container_identity_not_verified")
+        texts.append(text)
+        safe_segments.append(
+            {
+                "status": "verified" if not segment_issues else "not_observable",
+                "qualification_issues": sorted(set(segment_issues)),
+                "first_cri_timestamp": first,
+                "last_cri_timestamp": last,
+                "started_at": started if number(started) else None,
+                "ended_at": ended if number(ended) else None,
+                "records": len(lines),
+                "unframed_records": unframed,
+                "partial_line_bytes": partial,
+                "clock_regressions": regressions,
+                "interruption_observed_after_segment": segment.get("interruption")
+                is not None,
+            }
+        )
+    if cursor != len(raw):
+        issues.append("follow_log_segment_byte_ranges_not_verified")
+    return texts if not issues else [], {
+        "status": "verified" if not issues else "not_observable",
+        "qualification_issues": sorted(set(issues)),
+        "collector_sha256": FOLLOW_LOG_COLLECTOR_SHA256 if not issues else None,
+        "collection_errors": (
+            metadata.get("collection_errors")
+            if count(metadata.get("collection_errors"))
+            else None
+        ),
+        "segments": safe_segments if not issues else [],
+        "scope": "A single binary follow segment brackets the window with no observed transport interruption; reconnects are never bridged. This does not prove absolute absence of loss inside Kubernetes logging.",
+    }
+
+
+def verified_compile_log(directory, state):
+    """Verify raw bytes, collector source, pod identity and capture provenance."""
+    metadata = read_json(directory / "server-raw.meta.json")
+    issues = []
+    if (
+        metadata.get("schema_version") != 1
+        or metadata.get("format") != "kubectl-timestamps-lf-v1"
+        or metadata.get("capture_mode") != "full_current_container_log"
+        or metadata.get("container") != "sglang"
+    ):
+        issues.append("raw_log_format_not_verified")
+    if not state.get("pod_uid") or metadata.get("pod_uid") != state.get("pod_uid"):
+        issues.append("raw_log_pod_identity_not_verified")
+    first, last = metadata.get("first_success_at"), metadata.get("last_success_at")
+    if not number(first) or not number(last) or first > last:
+        issues.append("raw_log_capture_times_not_verified")
+    try:
+        source = (directory / "server-raw.collector.py").read_bytes()
+        source_hash = hashlib.sha256(source).hexdigest()
+        if (
+            not RAW_LOG_COLLECTOR_SHA256
+            or source_hash != RAW_LOG_COLLECTOR_SHA256
+            or metadata.get("collector_sha256") != source_hash
+        ):
+            issues.append("raw_log_collector_source_not_verified")
+    except OSError:
+        issues.append("raw_log_collector_source_missing")
+    raw = b""
+    try:
+        raw = (directory / "server-raw.log").read_bytes()
+        if (
+            metadata.get("log_bytes") != len(raw)
+            or metadata.get("log_sha256") != hashlib.sha256(raw).hexdigest()
+        ):
+            issues.append("raw_log_bytes_not_verified")
+        # kubectl timestamp prefixes bind physical LF records, not universal
+        # splitlines() fragments. Preserve embedded CR bytes during decoding.
+        log = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        issues.append("raw_log_missing_or_invalid_encoding")
+        log = ""
+    return (log if not issues else ""), {
+        "status": "verified" if not issues else "not_observable",
+        "qualification_issues": issues,
+        "first_success_at": first if number(first) else None,
+        "last_success_at": last if number(last) else None,
+        "collector_sha256": RAW_LOG_COLLECTOR_SHA256 if not issues else None,
+    }
 
 
 def compile_inventory(path):
@@ -237,10 +443,49 @@ def compile_inventory(path):
     return files, snapshot
 
 
-def compile_preparation_evidence(directory, log, begin, end):
+def compile_preparation_evidence(
+    directory,
+    log,
+    begin,
+    end,
+    log_provenance=None,
+    follow_texts=None,
+    follow_provenance=None,
+):
     before, before_meta = compile_inventory(directory / "before-compile-cache.json")
     after, after_meta = compile_inventory(directory / "after-compile-cache.json")
     window = number(begin) and number(end) and begin <= end
+    log_provenance = log_provenance or {"status": "not_observable"}
+    capture_window_verified = (
+        window
+        and log_provenance.get("status") == "verified"
+        and number(log_provenance.get("first_success_at"))
+        and number(log_provenance.get("last_success_at"))
+        and log_provenance["first_success_at"] <= begin
+        and log_provenance["last_success_at"] >= end
+    )
+    follow_texts = follow_texts or []
+    follow_provenance = follow_provenance or {"status": "not_observable"}
+    covering = []
+    if window and follow_provenance.get("status") == "verified":
+        for index, segment in enumerate(follow_provenance.get("segments", [])):
+            if (
+                index < len(follow_texts)
+                and segment.get("status") == "verified"
+                and number(segment.get("started_at"))
+                and segment["started_at"] <= begin
+                and number(segment.get("first_cri_timestamp"))
+                and segment["first_cri_timestamp"] <= begin
+                and number(segment.get("last_cri_timestamp"))
+                and segment["last_cri_timestamp"] >= end
+                and (segment.get("ended_at") is None or segment["ended_at"] >= end)
+            ):
+                covering.append(index)
+    follow_window_verified = bool(covering)
+    if covering:
+        # Select one actual continuous transport, never stitch overlapping
+        # reconnects or count replayed records from several segments twice.
+        log = follow_texts[covering[0]]
     inventories_observed = (
         before is not None
         and after is not None
@@ -278,14 +523,10 @@ def compile_preparation_evidence(directory, log, begin, end):
         }
     markers, unattributed = Counter(), 0
     timestamped_lines = 0
-    # Preserve tqdm carriage-return fragments inside their timestamped CRI line.
+    # Only verified binary capture grounds embedded CR fragments in the same
+    # timestamped LF record. Never attach a timestamp to an unframed next line.
     for line in log.split("\n"):
-        token = line.split(maxsplit=1)[0] if line.strip() else ""
-        try:
-            date = datetime.fromisoformat(token.replace("Z", "+00:00"))
-            timestamp = date.timestamp() if date.tzinfo is not None else None
-        except (ValueError, OverflowError):
-            timestamp = None
+        timestamp = cri_timestamp(line)
         timestamped_lines += timestamp is not None
         found = [key for key, text in COMPILE_MARKERS.items() if text in line]
         if not found:
@@ -294,7 +535,7 @@ def compile_preparation_evidence(directory, log, begin, end):
             unattributed += 1
         elif begin <= timestamp <= end:
             markers.update(found)
-    marker_observed = bool(timestamped_lines and window)
+    marker_observed = bool(timestamped_lines and follow_window_verified)
     preparation = bool((changes and changes["total"]) or markers)
     qualified = bool(
         inventories_observed
@@ -307,6 +548,8 @@ def compile_preparation_evidence(directory, log, begin, end):
         reasons.append("compile_inventory_not_observable_or_window_unverified")
     if not marker_observed or unattributed:
         reasons.append("compile_marker_window_not_observable")
+    if not follow_window_verified:
+        reasons.append("continuous_follow_marker_window_not_verified")
     if changes and changes["total"]:
         reasons.append("compiler_artifacts_changed_during_child_attempt")
     if markers:
@@ -319,6 +562,13 @@ def compile_preparation_evidence(directory, log, begin, end):
         ),
         "in_window_markers": dict(markers),
         "unattributed_marker_lines": unattributed,
+        "raw_log_provenance": log_provenance,
+        "raw_log_capture_window_verified": capture_window_verified,
+        "follow_log_provenance": follow_provenance,
+        "follow_log_window_verified": follow_window_verified,
+        "marker_source": (
+            "continuous_follow" if follow_window_verified else "raw_poll_diagnostic"
+        ),
         "preparation_evidence": preparation,
         "comparison_qualified": qualified,
         "qualification_issues": reasons,
@@ -991,7 +1241,17 @@ def request_affinity(path, log, profile, workload, catalog):
     return result, dict(cache_values)
 
 
-def summarize_workload(state, verdict_file, log, catalog, provenance=None):
+def summarize_workload(
+    state,
+    verdict_file,
+    log,
+    catalog,
+    provenance=None,
+    compile_log="",
+    compile_log_provenance=None,
+    follow_texts=None,
+    follow_provenance=None,
+):
     verdict = read_json(verdict_file)
     match = re.fullmatch(
         r"r(\d+)-(short|long-cold|long-warm)", verdict_file.parent.name
@@ -1018,7 +1278,15 @@ def summarize_workload(state, verdict_file, log, catalog, provenance=None):
         for key in ("cleanup_error", "export_error", "final_collection_error")
     )
     begin, end = row["_begin"], row["_end"]
-    compilation = compile_preparation_evidence(verdict_file.parent, log, begin, end)
+    compilation = compile_preparation_evidence(
+        verdict_file.parent,
+        compile_log,
+        begin,
+        end,
+        compile_log_provenance,
+        follow_texts,
+        follow_provenance,
+    )
     points, progress_windows, progress_seconds = [], None, None
     pp_observation = {} if state["profile"] == "pp2" else None
     dpa_observation = None
@@ -1532,6 +1800,12 @@ def analyze(roots, catalog_path=None):
                 attempts.append(attempt)
             log_path = state_file.parent / "server.log"
             log = log_path.read_text(errors="replace") if log_path.is_file() else ""
+            compile_log, compile_log_provenance = verified_compile_log(
+                state_file.parent, state
+            )
+            follow_texts, follow_provenance = verified_follow_log(
+                state_file.parent, state
+            )
             verdicts = sorted(
                 path
                 for path in result.rglob("verdict.json")
@@ -1541,7 +1815,17 @@ def analyze(roots, catalog_path=None):
                 issues["attempt_without_workload_verdict"] += 1
             for verdict_file in verdicts:
                 provenance = workload_provenance(verdict_file, result)
-                row = summarize_workload(state, verdict_file, log, catalog, provenance)
+                row = summarize_workload(
+                    state,
+                    verdict_file,
+                    log,
+                    catalog,
+                    provenance,
+                    compile_log,
+                    compile_log_provenance,
+                    follow_texts,
+                    follow_provenance,
+                )
                 if row is None:
                     issues["invalid_workload_verdict"] += 1
                 elif campaign_preparation:

@@ -1,9 +1,11 @@
+import hashlib
 import importlib.util
 import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location(
     "analyze_results", Path(__file__).parents[1] / "analyze_results.py"
@@ -16,6 +18,21 @@ class AnalyzerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.collector_source = b"# reviewed binary LF-framing fixture collector\n"
+        pin = patch.object(
+            analysis,
+            "RAW_LOG_COLLECTOR_SHA256",
+            hashlib.sha256(self.collector_source).hexdigest(),
+        )
+        pin.start()
+        self.addCleanup(pin.stop)
+        follow_pin = patch.object(
+            analysis,
+            "FOLLOW_LOG_COLLECTOR_SHA256",
+            hashlib.sha256(self.collector_source).hexdigest(),
+        )
+        follow_pin.start()
+        self.addCleanup(follow_pin.stop)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -27,6 +44,116 @@ class AnalyzerTests(unittest.TestCase):
     def linefile(self, path, values):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("".join(json.dumps(value) + "\n" for value in values))
+
+    def write_raw_log(
+        self,
+        run,
+        log="1970-01-01T00:00:01Z server observed\n",
+        include_follow=True,
+        **updates,
+    ):
+        directory = self.root / run
+        data = log.encode()
+        (directory / "server-raw.log").write_bytes(data)
+        (directory / "server-raw.collector.py").write_bytes(self.collector_source)
+        metadata = {
+            "schema_version": 1,
+            "format": "kubectl-timestamps-lf-v1",
+            "capture_mode": "full_current_container_log",
+            "container": "sglang",
+            "pod_uid": "private-pod-uuid",
+            "collector_sha256": analysis.RAW_LOG_COLLECTOR_SHA256,
+            "log_sha256": hashlib.sha256(data).hexdigest(),
+            "log_bytes": len(data),
+            "first_success_at": -3,
+            "last_success_at": 43,
+        }
+        self.write(directory / "server-raw.meta.json", metadata | updates)
+        if include_follow:
+            self.write_follow_log(run, [log])
+
+    def write_follow_log(self, run, logs, *, bracket=True):
+        directory = self.root / run
+        raw, segments = b"", []
+        for index, log in enumerate(logs):
+            if bracket and log:
+                log = (
+                    "1969-12-31T23:59:40Z before\n"
+                    + log
+                    + "1970-01-01T00:00:45Z after\n"
+                )
+            data = log.encode()
+            complete = log.split("\n")
+            partial = len(complete.pop().encode())
+            timestamps = [analysis.cri_timestamp(line) for line in complete]
+            framed = [value for value in timestamps if value is not None]
+            segments.append(
+                {
+                    "segment_id": index,
+                    "byte_start": len(raw),
+                    "byte_end": len(raw) + len(data),
+                    "records": len(complete),
+                    "unframed_records": timestamps.count(None),
+                    "partial_line_bytes": partial,
+                    "clock_regressions": sum(b < a for a, b in zip(framed, framed[1:])),
+                    "first_cri_timestamp": framed[0] if framed else None,
+                    "last_cri_timestamp": framed[-1] if framed else None,
+                    "started_at": -5,
+                    "ended_at": None,
+                    "returncode": None,
+                    "interruption": None,
+                    "restart_count": 0,
+                    "container_id": "private-container-id",
+                }
+            )
+            raw += data
+        (directory / "server-follow.log").write_bytes(raw)
+        (directory / "server-follow.collector.py").write_bytes(self.collector_source)
+        self.write(
+            directory / "server-follow.meta.json",
+            {
+                "schema_version": 1,
+                "format": "kubectl-follow-timestamps-lf-v1",
+                "capture_mode": "continuous_follow",
+                "container": "sglang",
+                "pod_uid": "private-pod-uuid",
+                "container_id": "private-container-id",
+                "restart_count": 0,
+                "collection_errors": 0,
+                "collector_sha256": analysis.FOLLOW_LOG_COLLECTOR_SHA256,
+                "log_sha256": hashlib.sha256(raw).hexdigest(),
+                "log_bytes": len(raw),
+                "segments": segments,
+            },
+        )
+
+    def compile_evidence(self, directory, log, begin, end):
+        return analysis.compile_preparation_evidence(
+            directory,
+            log,
+            begin,
+            end,
+            {
+                "status": "verified",
+                "qualification_issues": [],
+                "first_success_at": begin - 1,
+                "last_success_at": end + 1,
+                "collector_sha256": analysis.RAW_LOG_COLLECTOR_SHA256,
+            },
+            [log],
+            {
+                "status": "verified",
+                "segments": [
+                    {
+                        "status": "verified",
+                        "first_cri_timestamp": begin - 1,
+                        "last_cri_timestamp": end + 1,
+                        "started_at": begin - 1,
+                        "ended_at": None,
+                    }
+                ],
+            },
+        )
 
     def pp(self, timestamp, n=40, progress=True, **changes):
         ids = ["secret-request-" + str(index) for index in range(n)]
@@ -189,6 +316,7 @@ class AnalyzerTests(unittest.TestCase):
         (self.root / run_id / "server.log").write_text(
             "1970-01-01T00:00:01Z server observed\n"
         )
+        self.write_raw_log(run_id)
         self.write(
             self.root / "results" / run_id / "provenance.json",
             {
@@ -1020,11 +1148,12 @@ class AnalyzerTests(unittest.TestCase):
                 directory = self.root / "results" / run / "r01-long-cold"
                 if deficiency == "missing_inventory":
                     (directory / "before-compile-cache.json").unlink()
-                    (self.root / run / "server.log").write_text(
-                        "1970-01-01T00:00:20Z Try DeepGEMM JIT Compiling for PRIVATE\n"
+                    self.write_raw_log(
+                        run,
+                        "1970-01-01T00:00:20Z Try DeepGEMM JIT Compiling for PRIVATE\n",
                     )
                 elif deficiency == "missing_markers":
-                    (self.root / run / "server.log").write_text("")
+                    self.write_raw_log(run, "")
                 elif deficiency == "functional_error":
                     path = directory / "vllm.json"
                     value = json.loads(path.read_text())
@@ -1095,9 +1224,7 @@ class AnalyzerTests(unittest.TestCase):
     def test_untimed_cache_changes_are_not_claimed_as_timed_compilation(self):
         run = self.campaign()
         directory = self.root / "results" / run / "r01-long-cold"
-        evidence = analysis.compile_preparation_evidence(
-            directory, "1970-01-01T00:00:11Z ok", 10, 40
-        )
+        evidence = self.compile_evidence(directory, "1970-01-01T00:00:11Z ok", 10, 40)
         self.assertTrue(evidence["comparison_qualified"])
         path = directory / "after-compile-cache.json"
         after = json.loads(path.read_text())
@@ -1105,9 +1232,7 @@ class AnalyzerTests(unittest.TestCase):
             {"path": "triton/one.cubin", "size": 1, "mtime_ns": 5_000_000_000}
         ]
         self.write(path, after)
-        evidence = analysis.compile_preparation_evidence(
-            directory, "1970-01-01T00:00:11Z ok", 10, 40
-        )
+        evidence = self.compile_evidence(directory, "1970-01-01T00:00:11Z ok", 10, 40)
         self.assertEqual(
             evidence["artifact_changes"]["mtime_classification"],
             {"before_measurement": 1},
@@ -1119,17 +1244,15 @@ class AnalyzerTests(unittest.TestCase):
         run = self.campaign()
         directory = self.root / "results" / run / "r01-long-cold"
         before = "1969-12-31T23:59:59Z DeepGEMM warmup\rDeepGEMM warmup"
-        evidence = analysis.compile_preparation_evidence(directory, before, 0, 40)
+        evidence = self.compile_evidence(directory, before, 0, 40)
         self.assertTrue(evidence["comparison_qualified"])
         inside = "1970-01-01T00:00:20Z Try DeepGEMM JIT Compiling for PRIVATE"
-        evidence = analysis.compile_preparation_evidence(
-            directory, before + "\n" + inside, 0, 40
-        )
+        evidence = self.compile_evidence(directory, before + "\n" + inside, 0, 40)
         self.assertEqual(evidence["in_window_markers"], {"deepgemm_compile_attempt": 1})
         self.assertTrue(evidence["preparation_evidence"])
         self.assertNotIn("PRIVATE", json.dumps(evidence))
         (directory / "before-compile-cache.json").unlink()
-        evidence = analysis.compile_preparation_evidence(directory, before, 0, 40)
+        evidence = self.compile_evidence(directory, before, 0, 40)
         self.assertEqual(evidence["inventory_status"], "not_observable")
         self.assertIsNone(evidence["artifact_changes"])
         self.assertFalse(evidence["comparison_qualified"])
@@ -1150,12 +1273,287 @@ class AnalyzerTests(unittest.TestCase):
                 else:
                     before["finished_at"] = 1
                 self.write(path, before)
-                evidence = analysis.compile_preparation_evidence(
+                evidence = self.compile_evidence(
                     directory, "1970-01-01T00:00:01Z ok", 0, 40
                 )
                 self.assertEqual(evidence["inventory_status"], "not_observable")
                 self.assertFalse(evidence["comparison_qualified"])
                 self.assertNotIn("PRIVATE ERROR", json.dumps(evidence))
+
+    def test_verified_raw_cr_framing_prevents_startup_markers_poisoning_later_window(
+        self,
+    ):
+        run = self.campaign()
+        raw = (
+            "1969-12-31T23:59:50Z \rDeepGEMM warmup: 0%\rDeepGEMM warmup: 100%\n"
+            "1970-01-01T00:00:01Z regular scheduler observation\n"
+        )
+        self.write_raw_log(run, raw)
+        # This is the irreversible normalized form currently produced by the
+        # original collector. It must remain separate from compile evidence.
+        (self.root / run / "server.log").write_text(raw.replace("\r", "\n"))
+        state = json.loads((self.root / run / "run-state.json").read_text())
+        preserved, verification = analysis.verified_compile_log(self.root / run, state)
+        self.assertEqual(preserved.count("\r"), 2)
+        self.assertEqual(verification["status"], "verified")
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertTrue(evidence["comparison_qualified"])
+            self.assertEqual(evidence["marker_status"], "observed")
+            self.assertEqual(evidence["unattributed_marker_lines"], 0)
+            self.assertEqual(evidence["in_window_markers"], {})
+        self.write_raw_log(run, raw + "1970-01-01T00:00:20Z \rDeepGEMM warmup: 10%\n")
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertTrue(evidence["preparation_evidence"])
+            self.assertEqual(evidence["in_window_markers"], {"deepgemm_warmup": 1})
+            self.assertFalse(evidence["comparison_qualified"])
+        self.assertNotIn("private-pod", json.dumps(result))
+
+    def test_raw_lf_continuation_never_inherits_previous_timestamp(self):
+        run = self.campaign()
+        self.write_raw_log(
+            run,
+            "1969-12-31T23:59:50Z previous line\nDeepGEMM warmup: unknown framing\n1970-01-01T00:00:01Z next line\n",
+        )
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertEqual(evidence["unattributed_marker_lines"], 1)
+            self.assertEqual(evidence["marker_status"], "not_observable")
+            self.assertFalse(evidence["comparison_qualified"])
+            self.assertFalse(row["comparison_excluded_as_observed_preparation"])
+
+    def test_raw_log_integrity_source_identity_and_capture_window_fail_closed(self):
+        for defect in (
+            "missing",
+            "bytes",
+            "collector",
+            "pod",
+            "format",
+            "early_capture",
+            "late_start",
+        ):
+            with self.subTest(defect=defect):
+                run = self.campaign()
+                directory = self.root / run
+                for follow in directory.glob("server-follow.*"):
+                    follow.unlink()
+                path = directory / "server-raw.meta.json"
+                metadata = json.loads(path.read_text())
+                if defect == "missing":
+                    path.unlink()
+                elif defect == "bytes":
+                    (directory / "server-raw.log").write_bytes(
+                        b"1970-01-01T00:00:01Z altered\n"
+                    )
+                elif defect == "collector":
+                    source = (
+                        b"# unapproved collector even with internally matching SHA\n"
+                    )
+                    (directory / "server-raw.collector.py").write_bytes(source)
+                    metadata["collector_sha256"] = hashlib.sha256(source).hexdigest()
+                    self.write(path, metadata)
+                else:
+                    field, value = {
+                        "pod": ("pod_uid", "foreign-private-pod"),
+                        "format": ("format", "normalized-lines"),
+                        "early_capture": ("last_success_at", 10),
+                        "late_start": ("first_success_at", 10),
+                    }[defect]
+                    metadata[field] = value
+                    self.write(path, metadata)
+                result = analysis.analyze([self.root])
+                for row in result["runs"]:
+                    evidence = row["compile_preparation"]
+                    self.assertFalse(evidence["raw_log_capture_window_verified"])
+                    self.assertEqual(evidence["marker_status"], "not_observable")
+                    self.assertFalse(evidence["comparison_qualified"])
+                    self.assertFalse(row["comparison_excluded_as_observed_preparation"])
+                self.assertNotIn("foreign-private-pod", json.dumps(result))
+
+    def test_unverified_normalized_log_cannot_establish_marker_observability(self):
+        run = self.campaign()
+        directory = self.root / "results" / run / "r01-long-cold"
+        evidence = analysis.compile_preparation_evidence(
+            directory, "1970-01-01T00:00:01Z plain log\n", 0, 40
+        )
+        self.assertEqual(evidence["marker_status"], "not_observable")
+        self.assertFalse(evidence["comparison_qualified"])
+
+    def test_raw_poll_alone_is_diagnostic_not_continuous_coverage(self):
+        run = self.campaign()
+        directory = self.root / run
+        for path in directory.glob("server-follow.*"):
+            path.unlink()
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertTrue(evidence["raw_log_capture_window_verified"])
+            self.assertFalse(evidence["follow_log_window_verified"])
+            self.assertEqual(evidence["marker_source"], "raw_poll_diagnostic")
+            self.assertFalse(evidence["comparison_qualified"])
+
+    def test_verified_follow_is_independent_of_missing_poll_and_detects_its_own_markers(
+        self,
+    ):
+        run = self.campaign()
+        directory = self.root / run
+        (directory / "server-raw.meta.json").unlink()
+        result = analysis.analyze([self.root])
+        self.assertTrue(
+            all(
+                row["compile_preparation"]["comparison_qualified"]
+                for row in result["runs"]
+            )
+        )
+        self.write_follow_log(
+            run, ["1970-01-01T00:00:20Z \rDeepGEMM warmup: private prompt\n"]
+        )
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertTrue(evidence["follow_log_window_verified"])
+            self.assertEqual(evidence["marker_source"], "continuous_follow")
+            self.assertEqual(evidence["in_window_markers"], {"deepgemm_warmup": 1})
+            self.assertTrue(evidence["preparation_evidence"])
+            self.assertFalse(evidence["comparison_qualified"])
+        self.assertNotIn("private prompt", json.dumps(result))
+
+    def test_follow_reconnect_segments_never_bridge_even_touching_or_overlapping(self):
+        for second_start in (19, 20, 21):
+            with self.subTest(second_start=second_start):
+                run = self.campaign()
+                self.write_follow_log(
+                    run,
+                    [
+                        "1969-12-31T23:59:59Z first\n1970-01-01T00:00:20Z end first\n",
+                        f"1970-01-01T00:00:{second_start:02d}Z reconnect\n1970-01-01T00:00:45Z end second\n",
+                    ],
+                    bracket=False,
+                )
+                result = analysis.analyze([self.root])
+                for row in result["runs"]:
+                    evidence = row["compile_preparation"]
+                    self.assertEqual(
+                        evidence["follow_log_provenance"]["status"], "verified"
+                    )
+                    self.assertFalse(evidence["follow_log_window_verified"])
+                    self.assertFalse(evidence["comparison_qualified"])
+
+    def test_follow_healthy_later_segment_can_cover_window_without_bridging_bad_earlier_one(
+        self,
+    ):
+        run = self.campaign()
+        self.write_follow_log(
+            run,
+            [
+                "1969-12-31T23:59:00Z old\npartial private fragment",
+                "1969-12-31T23:59:59Z restarted collector\n1970-01-01T00:00:41Z complete\n",
+            ],
+            bracket=False,
+        )
+        path = self.root / run / "server-follow.meta.json"
+        meta = json.loads(path.read_text())
+        meta["collection_errors"] = 1
+        meta["segments"][0].update(
+            ended_at=-3, interruption="private transport error", returncode=1
+        )
+        meta["segments"][1].update(
+            ended_at=42, interruption="operator stopped after window", returncode=0
+        )
+        self.write(path, meta)
+        result = analysis.analyze([self.root])
+        for row in result["runs"]:
+            evidence = row["compile_preparation"]
+            self.assertTrue(evidence["comparison_qualified"])
+            self.assertEqual(
+                evidence["follow_log_provenance"]["segments"][0]["status"],
+                "not_observable",
+            )
+        rendered = json.dumps(result)
+        for private in (
+            "private fragment",
+            "private transport error",
+            "private-container-id",
+        ):
+            self.assertNotIn(private, rendered)
+
+    def test_follow_integrity_segment_metadata_and_transport_defects_fail_closed(self):
+        for defect in (
+            "bytes",
+            "collector",
+            "pod",
+            "ranges",
+            "timestamp",
+            "records",
+            "clock_regressions",
+            "partial",
+            "unframed",
+            "restart",
+            "container",
+            "late_connect",
+            "early_disconnect",
+            "missing_errors",
+        ):
+            with self.subTest(defect=defect):
+                run = self.campaign()
+                directory = self.root / run
+                if defect in {"clock_regressions", "partial", "unframed"}:
+                    tail = {
+                        "clock_regressions": "1970-01-01T00:00:10Z regressed\n",
+                        "partial": "partial private error",
+                        "unframed": "private unframed record\n",
+                    }[defect]
+                    self.write_follow_log(
+                        run,
+                        [
+                            "1969-12-31T23:59:59Z start\n1970-01-01T00:00:45Z finish\n"
+                            + tail
+                        ],
+                        bracket=False,
+                    )
+                path = directory / "server-follow.meta.json"
+                meta = json.loads(path.read_text())
+                if defect == "bytes":
+                    with (directory / "server-follow.log").open("ab") as stream:
+                        stream.write(b"altered\n")
+                elif defect == "collector":
+                    source = b"unapproved internally consistent collector"
+                    (directory / "server-follow.collector.py").write_bytes(source)
+                    meta["collector_sha256"] = hashlib.sha256(source).hexdigest()
+                elif defect == "pod":
+                    meta["pod_uid"] = "private foreign pod"
+                elif defect == "missing_errors":
+                    del meta["collection_errors"]
+                elif defect not in {"clock_regressions", "partial", "unframed"}:
+                    field, value = {
+                        "ranges": ("byte_end", meta["log_bytes"] - 1),
+                        "timestamp": ("last_cri_timestamp", 46),
+                        "records": ("records", 10000),
+                        "restart": ("restart_count", 1),
+                        "container": ("container_id", "private foreign container"),
+                        "late_connect": ("started_at", 10),
+                        "early_disconnect": ("ended_at", 10),
+                    }[defect]
+                    meta["segments"][0][field] = value
+                self.write(path, meta)
+                result = analysis.analyze([self.root])
+                for row in result["runs"]:
+                    evidence = row["compile_preparation"]
+                    self.assertFalse(evidence["follow_log_window_verified"])
+                    self.assertFalse(evidence["comparison_qualified"])
+                    self.assertFalse(row["comparison_excluded_as_observed_preparation"])
+                rendered = json.dumps(result)
+                for private in (
+                    "private foreign",
+                    "private unframed",
+                    "private error",
+                    "private-container-id",
+                ):
+                    self.assertNotIn(private, rendered)
 
 
 if __name__ == "__main__":
