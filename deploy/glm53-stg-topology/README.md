@@ -89,7 +89,8 @@ names and result directories preserve failed and successful attempts. The
 orchestrator journals mutations, refuses resources without its ownership
 label, runs profiles sequentially, collects ordinary API/log evidence, stops
 serving between profiles, and exports results in checksummed log chunks.
-Completed Jobs remain as evidence; GPU Deployments are scaled to zero.
+Completed Job manifests and pod logs are archived locally before Job deletion;
+results remain on the PVC. GPU Deployments are scaled to zero between profiles.
 
 `TOOLING_COMMIT` identifies the checked-out benchmark/orchestration revision and
 defaults to `SOURCE_COMMIT`. They may differ only when the launcher, installer,
@@ -119,6 +120,34 @@ throughput alone. If a profile cannot load or cannot sustain C40, report that
 boundary rather than silently lowering the concurrency or changing kernels.
 
 ## Concurrent binary log collection
+
+The user requested adaptive screening instead of continuing expensive series
+for slow profiles. The operational guard reads a separately reviewed local
+policy JSON with `campaign`, `long_measured_budget_seconds` and
+`zero_completed_child_budget_seconds`. The initial provisional budgets are900s
+for a long workload and1080s when no measured response has completed, allowing
+180s for client initialization and warmup in that fallback. The first budget
+uses the earliest observed measured-request start; a completed workload uses
+its last completion, so an old fast workload cannot age into a timeout.
+
+Render `render_campaign_watch.py --campaign CAMPAIGN --node VERIFIED_NODE`
+to a private file and apply it using ordinary Kubernetes API access. This adds
+one CPU-only Job reading only result files. Run `guard_campaign.py` with
+`--kubeconfig`, `--campaign-root`, `--policy` and `--output` pointing to private
+local paths. It archives the current Job and logs, records an explicit screening
+decision, then uses a UID-preconditioned foreground Job deletion. The existing
+orchestrator collects partial results and proceeds to the next profile.
+Such attempts are screening stops, not qualified performance measurements or
+proof of a runtime incompatibility. Automatic decisions require fresh progress;
+missing evidence is not treated as a measured timeout.
+
+After each profile export, the guard invokes `cleanup_completed_jobs.py`.
+Only owned terminal or suspended idle Jobs are eligible. Manifests, existing
+pod logs and checksums are saved before deletion; active and upcoming profile
+Jobs are protected with `--keep-run-id`. The guard and watcher are separate
+from the frozen benchmark and serving runtime. The guard archives and removes
+its watcher when the baseline campaign is complete. Screening can leave no qualified DPA finalist; do not
+substitute preparation timings for the missing comparison.
 
 Start this read-only auxiliary collector in another terminal before admission
 and measurements, using the orchestrator's same private campaign directory:
