@@ -1,0 +1,81 @@
+name: GLM53 STG topology image
+
+on:
+  pull_request:
+    branches: [work/glm53-upstream-0bcd822377da]
+    paths:
+      - deploy/glm53-stg-topology/**
+      - .github/workflows/glm53-stg-topology-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glm53-stg-topology-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify launcher, benchmark tooling and pinned sources
+        run: |
+          python3 -m pip install 'aiohttp==3.14.1'
+          python3 -m unittest discover -s deploy/glm53-stg-topology/tests -p 'test_*.py' -v
+          python3 deploy/glm53-stg-topology/install.py --package-root python/sglang
+      - name: Make room for the CUDA image
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+          df -h /
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve immutable tag
+        id: meta
+        shell: bash
+        run: |
+          commit=$(git rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:glm53-stg-topology-${commit:0:12}" >> "$GITHUB_OUTPUT"
+          cp deploy/glm53-stg-topology/.dockerignore .dockerignore
+      - name: Build and publish amd64 image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/glm53-stg-topology/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            SOURCE_COMMIT=${{ steps.meta.outputs.commit }}
+          provenance: mode=max
+      - name: Record immutable image and upstream
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+        run: |
+          printf 'Image: `%s@%s`\n\nCommit: `%s`\n\nUpstream: `0bcd822377da7b5718e674eaf9c870d349424dd1`\n' "$IMAGE" "$DIGEST" "$COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('image.json').write_text(json.dumps({key.lower(): os.environ[key] for key in ['IMAGE', 'DIGEST', 'COMMIT']}, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glm53-stg-topology-image
+          path: image.json

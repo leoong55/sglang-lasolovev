@@ -1,0 +1,109 @@
+{
+  "base_commit": "0bcd822377da7b5718e674eaf9c870d349424dd1",
+  "source_policy": "verify_only_no_runtime_source_patches",
+  "files": [
+    {
+      "path": "srt/server_args.py",
+      "sha256": "204fe57ba81acc25b7badcabf3b4b741021767c91f1d64e0df949cb175464b7c"
+    },
+    {
+      "path": "srt/environ.py",
+      "sha256": "a39ae8475f2bff6e5cea99f0675bcb6d6647c07540b4b5be65fa7b0b916327cd"
+    },
+    {
+      "path": "srt/arg_groups/parallel_hook.py",
+      "sha256": "ef212300c25a119138fb30199e05aefedc63f65d376e1d2e0cd6d612a07180a9"
+    },
+    {
+      "path": "srt/arg_groups/cuda_graph_hook.py",
+      "sha256": "a234ccf4f8f23328a18ed72ea4c7313286e6b205921d8bcea128e6fb0372defa"
+    },
+    {
+      "path": "srt/arg_groups/memory_hook.py",
+      "sha256": "91086cb29f78d52ed7a8e6cc3367adbaea62ca20619392e5e131bf7a2214085d"
+    },
+    {
+      "path": "srt/arg_groups/moe_hook.py",
+      "sha256": "c79df35783c3cc6356e95fab2d5f35186728d17727204a79c6907ff420006c95"
+    },
+    {
+      "path": "srt/arg_groups/hicache_hook.py",
+      "sha256": "78585b2444ed8c00e3e6732f6af54431662154a9486046dd0d0a2f9ca7283375"
+    },
+    {
+      "path": "srt/arg_groups/overrides.py",
+      "sha256": "af4086d5c3bbfc8789d82b196240226785c104809c48cb1f9a24f6962cafe4ac"
+    },
+    {
+      "path": "srt/arg_groups/validation_hook.py",
+      "sha256": "8c2663b552693c84b80b83fa29aaa210557a4bcc3ad88870f09d6f00a9995517"
+    },
+    {
+      "path": "srt/managers/scheduler.py",
+      "sha256": "3a12fdfb9c21571d8007ba60aedd7e84b67636583bac8243373c75d6a2ab324e"
+    },
+    {
+      "path": "srt/managers/schedule_policy.py",
+      "sha256": "5ceae6ad98493297bf557fdb38b6e53f654319e26238c9e4e22a00aead230e3c"
+    },
+    {
+      "path": "srt/managers/schedule_batch.py",
+      "sha256": "170f847aba6701d8d876a98c5edb8a66f188f5bc12fc30973596d132fcbb8c72"
+    },
+    {
+      "path": "srt/managers/scheduler_pp_mixin.py",
+      "sha256": "32ae89f013d88347152f8c8ab61e28839ebb0fe7960593d9c0a76bf238b163f1"
+    },
+    {
+      "path": "srt/models/glm4_moe.py",
+      "sha256": "d790f5d4aec262e6872755f10dcdf8f8fd79a80789a14914288f6026641fab5f"
+    },
+    {
+      "path": "srt/models/deepseek_v2.py",
+      "sha256": "8fa0cfb8e8d61b7e41680fb19a3d83bd00e0a1c2d7403b42e0a0db259b308c0b"
+    },
+    {
+      "path": "srt/layers/quantization/w4afp8.py",
+      "sha256": "21e9c527c9b83e350cdc35ce2bc62891cda1550934b2a5d302f0f807f752f125"
+    },
+    {
+      "path": "srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a8_fp8_moe.py",
+      "sha256": "adafb1332d0317a062ce6ad798cfef138756ce2bfed23e92696acd93e021dd27"
+    },
+    {
+      "path": "srt/layers/moe/cutlass_w4a8_moe.py",
+      "sha256": "101aaaa17a6eb92607dfad09007efe106d6e01a52d2bcf3da36e635c0d6d6fa5"
+    },
+    {
+      "path": "srt/model_executor/cuda_graph_config.py",
+      "sha256": "9f9250e3c4f9a36e6bd95aea9b57e76068b780ef38a6317c3b6240c0fcd3916d"
+    },
+    {
+      "path": "srt/model_executor/pool_configurator.py",
+      "sha256": "6ea48e3d6c474a4c868d172056e046fa137fadd251913dda4a6431b3aa1ca5fd"
+    },
+    {
+      "path": "srt/model_executor/model_runner_components/layer_setup.py",
+      "sha256": "c193cfa4354dd338bcd23bb39919921e78aee44e6a45b67a092c3ef003666dd4"
+    },
+    {
+      "path": "srt/mem_cache/hiradix_cache.py",
+      "sha256": "b60ebd1b63eee2c9e8a66b672fca00f338625929d9ec77a515d1c291551c2395"
+    },
+    {
+      "path": "srt/mem_cache/pool_host/base.py",
+      "sha256": "14498937a59d3747028a6250840ae9d8f5f5f960da2731083af2fd801d7f795b"
+    },
+    {
+      "path": "srt/mem_cache/pool_host/dsa.py",
+      "sha256": "aa408d25423fb3ecc30c6a0392a6550f520904634d66d00ca7cbdd9096a7d9c8"
+    },
+    {
+      "path": "srt/mem_cache/pool_host/mla.py",
+      "sha256": "b0aa464a0e0b9e3a10f92dbaf3dba1d198839997c69a2802acaa280de05cbb7e"
+    }
+  ],
+  "forbidden_paths": [
+    "srt/managers/pp_full_need.py"
+  ]
+}
