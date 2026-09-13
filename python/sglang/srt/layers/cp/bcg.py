@@ -186,10 +186,11 @@ class PrefillCPBCGInput:
         from sglang.srt.layers.cp.interleave import InterleaveCPStrategy
 
         if enabled() and isinstance(get_cp_strategy(), InterleaveCPStrategy):
-            from sglang.srt.layers.cp.glm53_bcg import exact_replay_bucket
+            from sglang.srt.layers.cp.glm53_bcg import replay_bucket
 
-            bucket = exact_replay_bucket(
-                num_tokens, extend_seq_lens, capture_num_tokens, get_cp_strategy().cp_size
+            bucket = replay_bucket(
+                num_tokens, extend_seq_lens, capture_num_tokens, get_cp_strategy().cp_size,
+                max_padding_factor=max_padding_factor,
             )
             if bucket is None or self.bucket_local_tokens.get(bucket) != bucket // 8:
                 return None
@@ -242,6 +243,10 @@ class PrefillCPBCGInput:
                 cp_size = len(metadata.per_rank_actual_token)
                 metadata.per_rank_actual_token = [captured_local_tokens] * cp_size
                 metadata.max_rank_len = [captured_local_tokens] * cp_size
+                if forward_batch.global_num_tokens_cpu is not None:
+                    from sglang.srt.layers.dp_attention import set_local_dp_buffer_len
+
+                    set_local_dp_buffer_len(captured_local_tokens * cp_size)
 
         raw_tokens = int(forward_batch.extend_num_tokens)
         global_input_ids = forward_batch.input_ids[:raw_tokens]
@@ -321,10 +326,11 @@ def execute_prefill_cp_bcg(
                 import logging
 
                 logging.getLogger(__name__).info(
-                    "GLM53 BCG replay=%d global_tokens=%d local_rows=%d",
+                    "GLM53 BCG replay=%d global_tokens=%d local_rows=%d raw_tokens=%d",
                     count,
                     static_num_tokens,
                     cp_input.live_local_tokens,
+                    raw_num_tokens,
                 )
         local_output = runner.backend.replay(
             ShapeKey(size=static_num_tokens),

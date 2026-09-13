@@ -122,6 +122,8 @@ def main():
     p.add_argument("--model-path", type=Path, required=True)
     p.add_argument("--checkpoint-layer", type=int, default=3)
     p.add_argument("--synthetic", action="store_true")
+    p.add_argument("--compare-ep-heuristic", action="store_true",
+                   help="Capture legacy and EP-aware Humming against the same weights")
     p.add_argument("--batches", type=int, nargs="+", default=[1, 8, 40, 48, 2048])
     p.add_argument("--iterations", type=int, default=50)
     p.add_argument("--output", type=Path, default=Path("/tmp/glm53-w4-humming.json"))
@@ -222,6 +224,9 @@ def main():
         layer.quant_method.process_weights_after_loading(layer)
         assert layer.num_experts == 256 and layer.num_local_experts == 32
     assert layers["humming"].quant_method.runner.fused_func is None
+    if args.compare_ep_heuristic:
+        # Two captures of one weight set; no second Humming model allocation.
+        layers["humming_legacy"] = layers["humming"]
 
     result = dict(
         rank=rank,
@@ -262,6 +267,8 @@ def main():
         fill(7)
         graphs, outputs = {}, {}
         for name, layer in layers.items():
+            if args.compare_ep_heuristic and name.startswith("humming"):
+                layer._humming_standard_ep_aware = name == "humming"
             for _ in range(5):
                 forward(layer)
             torch.cuda.synchronize()
@@ -282,6 +289,8 @@ def main():
                 local_assignments=int((local_ids >= 0).sum()),
             )
             for name, layer in layers.items():
+                if args.compare_ep_heuristic and name.startswith("humming"):
+                    layer._humming_standard_ep_aware = name == "humming"
                 eager = forward(layer).clone()
                 graphs[name].replay()
                 torch.cuda.synchronize()

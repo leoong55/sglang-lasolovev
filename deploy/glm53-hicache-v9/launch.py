@@ -159,6 +159,8 @@ def configure_runtime_env(profile):
     os.environ["SGLANG_GLM53_DRAFT_CACHE_WINDOW"] = str(profile.glm53_draft_cache_window)
     os.environ["SGLANG_GLM53_CP_DECODE_FUSION"] = "1" if profile.glm53_cp_decode_fusion == "attention" else "0"
     for name, enabled in (
+        ("SGLANG_GLM53_HUMMING_EP_AWARE", profile.moe_runner_backend == "humming"),
+        ("SGLANG_GLM53_PREFILL_BCG_PADDING", profile.cuda_graph_backend_prefill == "breakable"),
         ("SGLANG_GLM53_HICACHE_INDEX_ELISION", profile.enable_hierarchical_cache),
         ("SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH", bool(profile.glm53_draft_cache_window)),
     ):
@@ -184,6 +186,8 @@ if __name__ == "__main__":
           f"prefill-graphs={profile.cuda_graph_backend_prefill}; "
           f"decode-graphs={profile.cuda_graph_backend_decode}; "
           f"decode-max-bs={profile.cuda_graph_max_bs_decode}; "
-          f"prefill-buckets={profile.cuda_graph_bs_prefill}", flush=True)
+          f"prefill-buckets={profile.cuda_graph_bs_prefill}; "
+          f"humming-ep-aware={os.environ.get('SGLANG_GLM53_HUMMING_EP_AWARE', '1')}; "
+          f"prefill-padding={os.environ.get('SGLANG_GLM53_PREFILL_BCG_PADDING', '1')}", flush=True)
     print("glm53-hicache-v9: effective argv=" + json.dumps(argv), flush=True)
     os.execv(sys.executable, [sys.executable, "-m", "sglang.launch_server", *argv])

@@ -14,6 +14,7 @@ not a claim of bit-identical arithmetic or validated model accuracy.
 from __future__ import annotations
 
 import logging
+import os
 
 import torch
 
@@ -63,6 +64,12 @@ class W4AFp8HummingMoEMethod(W4AFp8MoEMethod):
         if moe_runner_config.params_dtype != torch.bfloat16:
             raise ValueError("W4AFP8 Humming currently requires BF16 model activations")
         self.moe_runner_config = moe_runner_config
+        # Only standard dispatch retains global top-k slots with remote IDs -1.
+        # DeepEP's already dispatched inputs must not receive this correction.
+        ep_aware = os.environ.get("SGLANG_GLM53_HUMMING_EP_AWARE", "1")
+        if ep_aware not in ("0", "1"):
+            raise ValueError("SGLANG_GLM53_HUMMING_EP_AWARE must be 0 or 1")
+        layer._humming_standard_ep_aware = ep_aware == "1"
         self.runner = MoeRunner(MoeRunnerBackend.HUMMING, moe_runner_config)
         # The standard fused wrapper creates a temporary HummingRunnerCore on
         # every invocation. Keep this runner alive for torch.compile custom-op

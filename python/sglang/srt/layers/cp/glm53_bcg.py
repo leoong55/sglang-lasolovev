@@ -1,4 +1,4 @@
-"""Opt-in exact-token BCG for full GLM-5.3 interleave CP8/DCP4.
+"""Opt-in fixed-row BCG for full GLM-5.3 interleave CP8/DCP4.
 
 Attention is an eager break with live request state; only fixed-row transformer
 segments are captured. This module does not alter decode execution.
@@ -80,6 +80,31 @@ def exact_replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size
     if rows is None or rows * cp_size != num_tokens:
         return None
     return num_tokens if num_tokens in capture_num_tokens else None
+
+
+def replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size=8,
+                  max_padding_factor=1.25):
+    """Pad only physical CP rows; request lengths and KV locations stay live.
+
+    Bound overhead to 25% even if the generic runner permits larger padding.
+    E.g. 16 * 1012 -> 16384, while 1012 remains eager with an 8192 minimum.
+    The exact-only rollback also uses this function.
+    """
+    if os.environ.get("SGLANG_GLM53_PREFILL_BCG_PADDING", "1") == "0":
+        return exact_replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size)
+    if cp_size != 8 or extend_seq_lens is None or num_tokens <= 0:
+        return None
+    lengths = [int(length) for length in extend_seq_lens]
+    if not lengths or min(lengths) <= 0 or sum(lengths) != num_tokens:
+        return None
+    # Interleave aligns each local shard to CP8 (64 global rows).
+    physical_local_rows = ((num_tokens + 63) // 64) * 8
+    limit = num_tokens * min(float(max_padding_factor), 1.25)
+    for bucket in capture_num_tokens:
+        if (bucket in CAPTURE_TOKEN_SIZES and num_tokens <= bucket <= limit
+                and physical_local_rows <= bucket // cp_size):
+            return bucket
+    return None
 
 
 def prepare_dcp(runner, batch):

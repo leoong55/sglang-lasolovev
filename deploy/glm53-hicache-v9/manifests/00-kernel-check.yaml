@@ -1,4 +1,3 @@
-# Replaces serving with sleep for the EP8 component check; API is unavailable.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +16,7 @@ spec:
       labels:
         app: sglang-glm53-dcp4
       annotations:
-        glm53-test-profile: v9.9-w4-component-check
+        glm53-test-profile: v9.10-w4-component-check
     spec:
       containers:
       - command:
@@ -68,7 +67,7 @@ spec:
           value: '0'
         - name: HUMMING_CACHE_DIR
           value: /mnt/cache/glm53-dcp4-v1/humming
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.9-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.10-0bcd822377da
         imagePullPolicy: IfNotPresent
         name: sglang
         ports:
