@@ -167,12 +167,22 @@ class GLM53BoundedDraftPool(MHATokenToKVPool):
             self.backing.index_copy_(0, ids_cpu, data_cpu)
             self.backing_valid[ids_cpu] = True
         self.logical_versions[virtual] += 1
-        ends = torch.full((self.max_requests + 1,), -1, dtype=torch.int64, device=self.device)
-        ends.scatter_reduce_(0, requests.to(torch.int64), positions.to(torch.int64), reduce="amax", include_self=True)
-        keep = positions > ends[requests.to(torch.int64)] - self.ring_stride
-        physical = self.physical_slots(requests[keep], positions[keep])
-        ids = virtual[keep]
-        self._put_gpu(physical, payload[keep])
+        if is_decode:
+            # The worker submits one accepted prefix of an 8-row block per
+            # request. Eight consecutive positions cannot lap the 2560-row
+            # ring, including a modulo wrap. Every supplied row must be kept.
+            # Avoid a scatter-reduce and four more dynamic boolean gathers.
+            ids = virtual
+            physical = self.physical_slots(requests, positions)
+        else:
+            ends = torch.full((self.max_requests + 1,), -1, dtype=torch.int64, device=self.device)
+            ends.scatter_reduce_(0, requests.to(torch.int64), positions.to(torch.int64), reduce="amax", include_self=True)
+            keep = positions > ends[requests.to(torch.int64)] - self.ring_stride
+            selected = keep.nonzero(as_tuple=True)[0]
+            physical = self.physical_slots(requests.index_select(0, selected), positions.index_select(0, selected))
+            ids = virtual.index_select(0, selected)
+            payload = payload.index_select(0, selected)
+        self._put_gpu(physical, payload)
         self.slot_virtual[physical] = ids
         self.slot_version[physical] = self.logical_versions[ids]
         if is_decode:

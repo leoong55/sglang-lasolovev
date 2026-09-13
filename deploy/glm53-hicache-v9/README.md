@@ -1,4 +1,11 @@
-Current patch: **v9.10**, based on v9.9. See [V9.10 validation and commands](benchmarks/V9.10-VALIDATION.md). Historical sections below describe the earlier releases.
+Current patch: **v9.12, based directly on v9.10** (`1f1171df23c98755c7d479d8befe071a9e13ecbe`).
+See [v9.12: Humming + DFlash, native EAGLE and build/run commands](benchmarks/V9.12-SPECULATION.md).
+The default Docker base is the existing v9.10 image. No custom CUTLASS extension,
+nvcc build, Torch/CUDA/Humming upgrade or model download is added. The stock
+CUTLASS runner from v9.10 remains selectable. GPU validation is outstanding.
+
+**The remaining sections are historical and their image/build instructions
+describe earlier releases. Use the v9.12 document and manifests 05–09.**
 
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 

@@ -320,6 +320,8 @@ class DFlashWorkerV2(BaseSpecWorker):
         self._draft_probs_buf = None
         self._logged_first_verify = False
         self._tp_sync = SpecTpSync(get_tp_group())
+        from sglang.srt.layers.cp.glm53_dflash_diagnostics import DFlashDiagnostics
+        self._glm53_diagnostics = DFlashDiagnostics(self.device, self.ps.tp_rank)
 
         bundle = build_draft_tp_worker(
             server_args=server_args,
@@ -490,6 +492,11 @@ class DFlashWorkerV2(BaseSpecWorker):
                 group=get_tp_group(),
             )
             if available_mem < 1.0:
+                if self._glm53_diagnostics.policy == "require":
+                    raise RuntimeError(
+                        "GLM53 DFLASH requires draft CUDA graphs but available GPU memory is below 1 GiB; "
+                        "reduce graph/KV reservations before retrying"
+                    )
                 capture_decode_cuda_graph = False
                 logger.warning(
                     "Disable DFLASH draft cuda graph because only %.2f GB GPU "
@@ -1414,13 +1421,20 @@ class DFlashWorkerV2(BaseSpecWorker):
                     k = attn.apply_k_rope(positions, attn.apply_k_norm(k))
                     layers.append(torch.stack((k.view(-1, 1, 128), v.view(-1, 1, 128)), dim=1))
                 payload = torch.stack(layers, dim=1)
-                valid = torch.ones(num_tokens, dtype=torch.bool, device=device)
                 if cache_loc_2d is not None:
                     offsets = torch.arange(cache_loc_2d.shape[1], device=device)
                     valid = (offsets[None, :] < commit_lens[:, None]).reshape(-1)
+                    # CUDA boolean indexing performs nonzero to determine each
+                    # result shape. Compact ONCE and reuse fixed-size gathers;
+                    # four independent mask reads otherwise synchronize four times.
+                    selected = valid.nonzero(as_tuple=True)[0]
+                    cache_loc = cache_loc.index_select(0, selected)
+                    context_request_ids = context_request_ids.index_select(0, selected)
+                    positions = positions.index_select(0, selected)
+                    payload = payload.index_select(0, selected)
                 self.draft_model_runner.token_to_kv_pool.commit_context(
-                    virtual=cache_loc[valid], requests=context_request_ids[valid],
-                    positions=positions[valid], payload=payload[valid],
+                    virtual=cache_loc, requests=context_request_ids,
+                    positions=positions, payload=payload,
                     is_decode=cache_loc_2d is not None,
                 )
                 return
@@ -1928,6 +1942,8 @@ class DFlashWorkerV2(BaseSpecWorker):
         assert self._draft_seq_lens_cpu_buf is not None
 
         block_ids = self._draft_block_ids_buf[:bs]
+        diagnostics = self._glm53_diagnostics
+        diagnostics.start(bs)
         prefix_lens = batch.seq_lens
         positions_2d = self._draft_block_positions_buf[:bs]
         verify_out_cache_loc_2d = self._draft_verify_out_cache_loc_buf[:bs]
@@ -2081,6 +2097,7 @@ class DFlashWorkerV2(BaseSpecWorker):
                     bs=bs, sampling_info=batch.sampling_info
                 )
 
+        diagnostics.mark("prepare")
         with torch.inference_mode():
             draft_out = self.draft_model_runner.forward(forward_batch)
         draft_logits_output = draft_out.logits_output
@@ -2124,6 +2141,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             GrammarTree.from_linear_chain(draft_tokens) if batch.has_grammar else None
         )
 
+        diagnostics.mark("draft")
         # --- 2) Target verify.
         # TARGET_VERIFY uses standard causal masking; custom masks are unnecessary here.
         custom_mask = None
@@ -2170,6 +2188,10 @@ class DFlashWorkerV2(BaseSpecWorker):
         )
         logits_output = target_out.logits_output
         can_run_cuda_graph = target_out.can_run_cuda_graph
+        diagnostics.graph_status(
+            bs=bs, width=block_size, draft=draft_out.can_run_graph,
+            verify=can_run_cuda_graph, sampler=folded,
+        )
 
         grammar_mask = None
         if batch.has_grammar:
@@ -2192,6 +2214,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         if grammar_mask is not None:
             grammar_mask.apply(logits_output.next_token_logits)
 
+        diagnostics.mark("verify")
         candidates = draft_tokens
         (
             accept_len,
@@ -2258,6 +2281,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         if on_publish is not None:
             on_publish(new_seq_lens)
 
+        diagnostics.mark("accept")
         # --- 3) Materialize committed verify-input tokens into draft KV cache.
         hidden = logits_output.hidden_states
         if hidden is None:
@@ -2275,6 +2299,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             context_request_ids=(batch.req_pool_indices[:, None].expand(bs, block_size).reshape(-1)
                                  if self.use_bounded_draft_cache else None),
         )
+        diagnostics.mark("cache")
+        diagnostics.finish(commit_lens)
 
         # Avoid copying large hidden-state buffers to CPU in overlap scheduling.
         logits_output.hidden_states = None

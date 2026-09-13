@@ -260,6 +260,30 @@ class BoundedDraftTest(unittest.TestCase):
             self.assertEqual(pointers, [x.data_ptr() for x in (sampler.temperatures, sampler.greedy_mask, sampler.out)])
         self.assertTrue(torch.allclose(sampler.temperatures, torch.full((32,), .3)))
 
+    def test_decode_commit_c80_wrap_and_rejected_rows(self):
+        pool = self.pool(logical=2048, requests=80)
+        width = 8
+        ids = torch.arange(256, 256 + 80 * width).reshape(80, width)
+        requests = torch.arange(1, 81)[:, None].expand(80, width)
+        positions = (pool.ring_stride - 4 + torch.arange(width))[None, :].expand(80, width)
+        lengths = 1 + torch.arange(80) % width
+        selected = (torch.arange(width)[None, :] < lengths[:, None]).flatten().nonzero(as_tuple=True)[0]
+        values = self.data(80 * width)
+        kept_ids = ids.flatten().index_select(0, selected)
+        kept_pos = positions.flatten().index_select(0, selected)
+        kept_req = requests.flatten().index_select(0, selected)
+        kept_values = values.index_select(0, selected)
+        pool.commit_context(virtual=kept_ids, requests=kept_req, positions=kept_pos,
+                            payload=kept_values, is_decode=True)
+        physical = pool.physical_slots(kept_req, kept_pos)
+        self.assertEqual(physical.unique().numel(), physical.numel())
+        self.assertTrue(torch.equal(pool.slot_virtual[physical], kept_ids))
+        self.assertTrue(torch.equal(pool.backing[kept_ids], kept_values))
+        self.assertEqual(int(pool.backing_valid.sum()), int(lengths.sum()))
+        for layer in range(6):
+            self.assertTrue(torch.equal(pool.k_buffer[layer][physical], kept_values[:, layer, 0]))
+            self.assertTrue(torch.equal(pool.v_buffer[layer][physical], kept_values[:, layer, 1]))
+
     def owner(self, slot, prefix):
         # Real Req instances and Tensor prefixes support weak references.
         class Request:

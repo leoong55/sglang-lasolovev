@@ -13,6 +13,7 @@ PREVIOUS = "6526bef6bf959e203a0cc23dacdb2553f81c1e3e"
 PR_HEAD = "c6aeb8b9d9128b816777e2b64cbf6603344e8fe1"
 V98 = "2aa3716d0e9f4d55dca0e5c31dbef2b8c55a3dcf"
 V99 = "6bd52126422de3671558f3e412bba0cd57188aa8"
+V910 = "1f1171df23c98755c7d479d8befe071a9e13ecbe"
 
 
 def main():
@@ -60,6 +61,11 @@ def main():
     )
     for path in paths:
         before = None if path in added else git("show", f"{BASE}:{path}")
+        previous_exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{V910}:{path}"], cwd=repo,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        previous = git("show", f"{V910}:{path}") if previous_exists else None
         after = (repo / path).read_bytes()
         target = output / "overlay" / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -71,11 +77,12 @@ def main():
                 if before is not None
                 else None,
                 patched_sha256=hashlib.sha256(after).hexdigest(),
+                previous_sha256=hashlib.sha256(previous).hexdigest() if previous is not None else None,
             )
         )
     (output / "runtime.patch").write_bytes(patch)
-    (output / "v9.9-to-v9.10.patch").write_bytes(
-        git("diff", "--binary", V99, "--", "python/sglang", str(source.relative_to(repo)))
+    (output / "v9.10-to-v9.12.patch").write_bytes(
+        git("diff", "--binary", V910, "--", "python/sglang", str(source.relative_to(repo)))
     )
     (output / "v8-to-hicache.patch").write_bytes(
         git(
@@ -97,11 +104,14 @@ def main():
                 upstream_pr_head=PR_HEAD,
                 gpu_validated=False,
                 image_built_here=False,
-                profile="glm53-hicache-v9.10",
+                profile="glm53-hicache-v9.12",
                 moe_backend_default="cutlass",
                 moe_backend_opt_in="humming",
                 humming_version="0.1.12",
-                previous_working_commit=V99,
+                previous_working_commit=V910,
+                cutlass_extension_included=False,
+                default_build_base="glm53-hicache-v9.10-0bcd822377da",
+                speculative_profiles={"cp8-dcp4": ["off", "DFLASH"], "tp8": ["off", "EAGLE"]},
                 humming_ep_aware_default=True,
                 prefill_padding_max_factor=1.25,
             ),
