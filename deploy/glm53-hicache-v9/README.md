@@ -1,5 +1,35 @@
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 
+## v9.9: opt-in W4AFP8 Humming MoE, same CP8/DCP4 profile
+
+Image: `glm53-hicache-v9.9-0bcd822377da`, cumulative over the exact v9.8
+`2aa3716d0e9f4d55dca0e5c31dbef2b8c55a3dcf`. The default remains the existing
+CUTLASS W4 path. Opt in with `--quantization w4afp8 --moe-runner-backend humming`;
+roll back with `--moe-runner-backend cutlass` and a restart on the same image.
+Dense FP8, attention, CP8/DCP4 and HiCache use the existing implementation.
+
+Humming preserves the signed INT4 expert weights but uses dynamic per-token FP8
+activation scales instead of CUTLASS's checkpoint-static scales. Model accuracy
+must be checked; this is not bit-identical arithmetic. The adapter uses the
+original W4 weight loader and EP ownership, converts one sublayer at a time,
+and retains a persistent runner for CUDA graphs / compiled custom-op IDs.
+
+The initial profile requires A2A none, BF16 model activations, ordinary gated
+SiLU, separate shared experts and DFlash off. Humming 0.1.12 is already pinned
+in the upstream project's dependencies and is checked during image build.
+The patch does not silently upgrade Torch, CUDA or Humming or fall back to a
+different backend after a CUDA error.
+
+See [V9.9-VALIDATION.md](benchmarks/V9.9-VALIDATION.md): complete build commands,
+one-real-layer EP8 eager/changed-input graph check, short and long serving
+benchmarks, accuracy checks and rollback. `manifests/00-kernel-check.yaml`,
+`01-cutlass.yaml` and `02-humming.yaml` replace the existing Deployment through
+Recreate on the same eight GPUs. Apply them sequentially; no extra replica.
+
+Validation here: **86 CPU tests pass**, dependency/API check passes; YAML and
+Python syntax checked. **Image build, GPU execution, model accuracy and speed
+remain unvalidated. No speedup is claimed.**
+
 ## v9.8: opt-in CP decode attention reduction + RMSNorm
 
 Image tag: `glm53-hicache-v9.8-0bcd822377da`. Cumulative over v9.7

@@ -101,6 +101,14 @@ class W4AFp8Config(QuantizationConfig):
                 return UnquantizedLinearMethod()
             return Fp8LinearMethod(self)
         elif isinstance(layer, FusedMoE):
+            from sglang.srt.layers.moe import get_moe_runner_backend
+
+            if get_moe_runner_backend().is_humming():
+                from sglang.srt.layers.quantization.w4afp8_humming import (
+                    W4AFp8HummingMoEMethod,
+                )
+
+                return W4AFp8HummingMoEMethod(self)
             return W4AFp8MoEMethod(self)
         return None
 
