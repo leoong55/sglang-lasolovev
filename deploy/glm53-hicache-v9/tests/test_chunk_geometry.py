@@ -60,7 +60,10 @@ class GeometryTest(unittest.TestCase):
                 def call(n=total):
                     return namespace[method.name](owner,num_tokens=n,extend_seq_lens=[n],capture_num_tokens=[8192,16384,32768],max_padding_factor=4)
                 self.assertEqual(call(),total)
-                self.assertIsNone(call(total-1))
+                with patch.dict(os.environ, {"SGLANG_GLM53_PREFILL_BCG_PADDING": "1"}):
+                    self.assertEqual(call(total-1), total)
+                with patch.dict(os.environ, {"SGLANG_GLM53_PREFILL_BCG_PADDING": "0"}):
+                    self.assertIsNone(call(total-1))
                 owner.bucket_local_tokens[total]+=1
                 self.assertIsNone(call())
                 owner.bucket_local_tokens[total]-=1

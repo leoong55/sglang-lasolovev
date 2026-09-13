@@ -1,3 +1,5 @@
+Current patch: **v9.10**, based on v9.9. See [V9.10 validation and commands](benchmarks/V9.10-VALIDATION.md). Historical sections below describe the earlier releases.
+
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 
 ## v9.9: opt-in W4AFP8 Humming MoE, same CP8/DCP4 profile
