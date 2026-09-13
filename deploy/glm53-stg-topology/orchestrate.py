@@ -112,6 +112,23 @@ def benchmark_job(args, run_id, profile, purpose, repetitions=1):
     return obj
 
 
+def serving_objects(args, profile, phase):
+    objects = render.serving(
+        profile, args.image, args.commit, args.node, hicache=phase == "hicache"
+    )
+    template = objects[0]["spec"]["template"]
+    container = template["spec"]["containers"][0]
+    # Native /health requires a generated token within20 seconds. A legitimate
+    # first long prefill can exceed that while workers continue making progress.
+    # Keep generated startup readiness, then check HTTP API availability only.
+    # Worker watchdogs, admission and full workload validation remain mandatory.
+    container["readinessProbe"]["httpGet"]["path"] = "/model_info"
+    template["metadata"].setdefault("annotations", {})[
+        "glm53-readiness-policy"
+    ] = "api-after-generated-startup"
+    return objects
+
+
 class Cluster:
     def __init__(self, kubeconfig, output):
         self.prefix = [
@@ -425,6 +442,7 @@ def run_profile(cluster, args, profile, phase, repetitions):
         "configmap_sha256": args.configmap_sha256,
         "serving_critical_sha256": args.serving_critical_sha256,
         "preparation_skipped": args.skip_preparation,
+        "readiness_policy": "API model_info after generated startup; worker watchdog, admission and workload validation retained",
         "image": args.image,
         "node": args.node,
     }
@@ -432,9 +450,7 @@ def run_profile(cluster, args, profile, phase, repetitions):
     jobs = []
     try:
         cluster.stop()
-        objects = render.serving(
-            profile, args.image, args.commit, args.node, hicache=phase == "hicache"
-        )
+        objects = serving_objects(args, profile, phase)
         (evidence / "serving-manifest.json").write_text(json.dumps(objects, indent=2))
         cluster.apply(objects)
         pod = cluster.ready(evidence)

@@ -60,6 +60,30 @@ class RevisionTests(unittest.TestCase):
 
 
 class PreparationTests(unittest.TestCase):
+    def test_long_prefill_readiness_changes_only_api_probe_and_annotation(self):
+        args = self.args(None)
+        for profile in ("pp2", "dpa2", "dpa4", "dpa8"):
+            for phase in ("baseline", "hicache"):
+                expected = orchestrate.render.serving(
+                    profile,
+                    args.image,
+                    args.commit,
+                    args.node,
+                    hicache=phase == "hicache",
+                )
+                actual = orchestrate.serving_objects(args, profile, phase)
+                template = actual[0]["spec"]["template"]
+                container = template["spec"]["containers"][0]
+                self.assertEqual(
+                    container["startupProbe"]["httpGet"]["path"], "/health"
+                )
+                self.assertEqual(
+                    container["readinessProbe"]["httpGet"]["path"], "/model_info"
+                )
+                container["readinessProbe"]["httpGet"]["path"] = "/health"
+                template["metadata"]["annotations"].pop("glm53-readiness-policy")
+                self.assertEqual(actual, expected)
+
     def test_deleted_deployment_still_waits_for_terminating_gpu_pods(self):
         cluster = object.__new__(orchestrate.Cluster)
         cluster.call = Mock(return_value=SimpleNamespace(stdout=""))

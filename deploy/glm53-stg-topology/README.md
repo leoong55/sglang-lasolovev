@@ -96,6 +96,12 @@ defaults to `SOURCE_COMMIT`. They may differ only when the launcher, installer,
 source manifest, observer, supervisor, Dockerfile and renderer remain identical
 to the serving image's source. Both revisions and the immutable ConfigMap hash
 are recorded. This permits client fixes without changing the model runtime.
+The orchestrator makes one declared operational adjustment after rendering:
+startup probes retain generated `/health`, while ongoing readiness uses
+`/model_info`. Native generated health has a20-second deadline and falsely
+failed during a progressing first75k prefill. Admission, worker watchdogs,
+pod-generation checks and full workload correctness remain required; API
+readiness alone never establishes working inference or capacity.
 
 Every profile first passes admission smoke, then a full unmeasured rehearsal
 (short, cold long, repeated long), then the requested measurements on the same
