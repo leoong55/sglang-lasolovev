@@ -3,5 +3,4 @@
 image-inspect.json
 __pycache__
 **/__pycache__
-tests
 make_bundle.py

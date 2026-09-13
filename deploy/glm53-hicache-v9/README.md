@@ -1,4 +1,4 @@
-Current patch: **v9.11** (includes v9.10). See [V9.11 build, tuning and rollback commands](benchmarks/V9.11-VALIDATION.md). Use the files in `manifests/` for this release; older sections below are historical.
+Current patch: **v9.11.1** (includes v9.10 and v9.11). See [V9.11.1 sequential build and image flavors](benchmarks/V9.11.1-BUILD.md), then [CUTLASS tuning and rollback commands](benchmarks/V9.11-VALIDATION.md). Use the files in `manifests/` for this release; older sections below are historical.
 
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 

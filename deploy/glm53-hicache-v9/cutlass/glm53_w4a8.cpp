@@ -1,22 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // GLM53-only launch choices over SGLang's existing CUTLASS W4A8 mainloop.
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
-#include <type_traits>
-#include "moe/cutlass_moe/w4a8/w4a8_grouped_mm_c3x.cuh"
+#include "glm53_w4a8.h"
 
 namespace {
-template <int M, int N, int ClusterM, bool Pingpong>
-using Gemm = cutlass_3x_w4a8_group_gemm<
-    cute::Shape<cute::Int<M>, cute::Int<N>, cute::_512>,
-    cute::Shape<cute::Int<ClusterM>, cute::_1, cute::_1>,
-    std::conditional_t<Pingpong,
-        cutlass::gemm::KernelPtrArrayTmaWarpSpecializedPingpong,
-        cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative>,
-    std::conditional_t<Pingpong,
-        cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong,
-        cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative>>;
-
 void run(torch::Tensor out, const torch::Tensor& a, const torch::Tensor& b,
          const torch::Tensor& as, const torch::Tensor& bs,
          const torch::Tensor& offsets, const torch::Tensor& problems,
@@ -52,17 +41,17 @@ void run(torch::Tensor out, const torch::Tensor& a, const torch::Tensor& b,
   // The original caller consumes actual GPU problem sizes, including empty
   // groups. Tile M is the output-channel dimension of the transposed GEMM;
   // tile N is its token dimension. K=512 preserves scale packing exactly.
-#define CALL(M, N, C, PP) \
-  cutlass_w4a8_group_gemm_caller<Gemm<M, N, C, PP>>( \
+#define CALL(ID) \
+  glm53_cutlass::launch_variant_##ID( \
       out, a, b, as, bs, offsets, problems, astr, bstr, dstr, sstr, group_size)
   switch (variant) {
-    case 1: CALL(128, 16, 1, false); break;
-    case 2: CALL(128, 32, 1, false); break;
-    case 3: CALL(128, 64, 1, false); break;
-    case 4: CALL(64, 16, 1, true); break;
-    case 5: CALL(64, 32, 1, true); break;
-    case 6: CALL(128, 32, 2, false); break;
-    case 7: CALL(128, 16, 2, false); break;
+    case 1: CALL(1); break;
+    case 2: CALL(2); break;
+    case 3: CALL(3); break;
+    case 4: CALL(4); break;
+    case 5: CALL(5); break;
+    case 6: CALL(6); break;
+    case 7: CALL(7); break;
     default: TORCH_CHECK(false, "Unknown GLM53 CUTLASS variant: ", variant);
   }
 #undef CALL
