@@ -49,9 +49,12 @@ def install(root, bundle, verify_only=False):
         current = digest(old) if old is not None else None
         if current == row["patched_sha256"]:
             continue
-        if verify_only or current != row["base_sha256"]:
+        accepted = {row["base_sha256"]}
+        if row.get("previous_sha256") is not None:
+            accepted.add(row["previous_sha256"])
+        if verify_only or current not in accepted:
             raise RuntimeError(
-                f"Source mismatch: {target}; expected base {manifest['base_commit']} or this exact patch"
+                f"Source mismatch: {target}; expected pinned base, verified v9.10 or this exact patch"
             )
         pending.append((target, old, new))
     changed = []

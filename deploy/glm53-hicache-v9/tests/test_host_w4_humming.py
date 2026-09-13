@@ -336,7 +336,7 @@ class W4HummingTest(unittest.TestCase):
             if name.endswith("input_scale"):
                 self.assertTrue(name.endswith(shard + ".input_scale"))
 
-    def test_launcher_backend_is_explicit_and_rejects_confounding_features(self):
+    def test_launcher_backend_preserves_speculation_and_rejects_cp_fusion(self):
         base = drop_options(args_for(16384, [8192, 16384]), ["--speculative-"])
         with (
             patch.object(launch, "validate"),
@@ -346,8 +346,10 @@ class W4HummingTest(unittest.TestCase):
                 argv = base + ["--moe-runner-backend", backend]
                 self.assertEqual(launch.check_profile(argv).moe_runner_backend, backend)
                 self.assertEqual(launch.runtime_argv(argv), argv)
+            spec = args_for(16384, [16384]) + ["--moe-runner-backend", "humming"]
+            self.assertEqual(launch.check_profile(spec).speculative_algorithm, "DFLASH")
+            self.assertEqual(launch.runtime_argv(spec), spec)
             for argv in (
-                args_for(16384, [16384]) + ["--moe-runner-backend", "humming"],
                 base
                 + [
                     "--moe-runner-backend",
