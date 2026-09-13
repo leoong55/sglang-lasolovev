@@ -118,6 +118,39 @@ Select `dpaN` using long benchmark results and capacity evidence, not short
 throughput alone. If a profile cannot load or cannot sustain C40, report that
 boundary rather than silently lowering the concurrency or changing kernels.
 
+## CPU client validation
+
+`client_harness.py` runs the actual pinned vLLM client and checkpoint tokenizer
+against a strict synthetic server on container loopback. It checks admission,
+400 short requests,300 cold long requests and300 repeated long requests, exact
+catalog/body joins, usage, finish reasons and cache-flush order. This uses4CPU
+and16GiB, with no GPU request or Service. The existing `sglang-w4fp8-pvc` and
+`glm53-topology-results` PVCs are prerequisites; the model mount is read-only.
+
+Render from the committed tooling checkout, supplying the node privately:
+
+```bash
+python3 deploy/glm53-stg-topology/render_client_validation.py \
+  --node VERIFIED_NODE \
+  --run-id client-validation-UNIQUE_ID \
+  --tooling-commit TOOLING_COMMIT > /absolute/private/client-validation.json
+```
+
+Replace the placeholders with a verified node, a unique lowercase DNS label
+and its full40-character tooling commit. The renderer verifies the local source
+against that commit and emits a separate immutable ConfigMap plus CPU Job.
+It does not contact Kubernetes. Keep the rendered manifest private; use the
+same authorized Kubernetes workflow to create the resources.
+
+Results live under `/results/client-validation-UNIQUE_ID` with
+`purpose=validation`, a ConfigMap SHA and explicit synthetic provenance.
+`client-validation-summary.json` must report `status=passed`; the harness
+refuses an existing nonempty result directory. All child timings and output
+tokens are synthetic protocol fixtures. They establish no model performance,
+KV capacity, cache-hit behavior or server C40, and must remain outside model
+comparisons. Keep raw artifacts local; `export.py` can export the dedicated
+directory through checksummed log chunks using the same scripts ConfigMap.
+
 ## Workload and evidence contract
 
 The CPU benchmark Job uses `vllm bench serve`, OpenAI chat and model `GLM-5.3`:
