@@ -1,0 +1,9 @@
+**
+!deploy/
+!deploy/glm53-stg-topology/
+!deploy/glm53-stg-topology/**
+**/__pycache__/
+**/*.pyc
+**/results/
+**/evidence/
+**/*kubeconfig*

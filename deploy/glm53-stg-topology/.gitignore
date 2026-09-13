@@ -1,0 +1,5 @@
+evidence/
+results/
+__pycache__/
+*.pyc
+*kubeconfig*
