@@ -503,6 +503,55 @@ class SmokeReasoningTests(unittest.IsolatedAsyncioTestCase):
     "aiohttp not installed; pure contract tests still run",
 )
 class RecorderIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_session_reads_metrics_without_decoding_compressed_bytes(
+        self,
+    ):
+        import gzip
+
+        from aiohttp import web
+
+        metrics = b"sglang:num_running_reqs 0\n"
+
+        async def upstream(request):
+            if "gzip" in request.headers.get("Accept-Encoding", ""):
+                return web.Response(
+                    body=gzip.compress(metrics), headers={"Content-Encoding": "gzip"}
+                )
+            return web.Response(body=metrics)
+
+        origin = web.Application()
+        origin.router.add_get("/metrics", upstream)
+        runner = web.AppRunner(origin)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                args = SimpleNamespace(
+                    mode="smoke",
+                    results_dir=Path(folder),
+                    tokenizer="/model",
+                    profile="pp2",
+                    source_commit="a" * 40,
+                    image_digest="sha256:test",
+                    base_url=f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}",
+                    workload_timeout=60,
+                )
+
+                async def probe(session, args):
+                    async with session.get(args.base_url + "/metrics") as response:
+                        self.assertEqual(await response.text(), metrics.decode())
+
+                with (
+                    patch.object(
+                        benchmark.importlib.metadata, "version", return_value="0.23.0"
+                    ),
+                    patch.object(benchmark, "smoke", side_effect=probe),
+                ):
+                    self.assertEqual(await benchmark.run(args), 0)
+        finally:
+            await runner.cleanup()
+
     async def test_proxy_preserves_body_headers_and_split_stream_bytes(self):
         from aiohttp import ClientSession, web
 

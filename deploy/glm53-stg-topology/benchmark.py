@@ -648,7 +648,7 @@ async def run_workload(
             "request_id_hook": "fills missing sample.request_id only; header metadata, not request body",
             "natural_eos_hook": "undo vLLM 0.23.0 automatic random ignore_eos=True; short only",
             "cache_state": (
-                "flushed before vLLM ready check and warmup"
+                "flushed before one vLLM warmup; readiness retry disabled by client default"
                 if kind != "long-warm"
                 else "immediate repeated workload; no cache flush"
             ),
@@ -888,7 +888,7 @@ async def run(args: argparse.Namespace) -> int:
             "tokenizer": args.tokenizer,
             "argv": vars(args) | {"results_dir": str(args.results_dir)},
             "short_sampling": "natural EOS restored after vLLM 0.23.0 random override; temperature/thinking omitted",
-            "cold_definition": "flush before vLLM initial ready check and explicit warmup",
+            "cold_definition": "flush before one vLLM warmup; readiness retry disabled by client default",
             "server_pp_c40": "requires separate unique-rid observer evidence from serving logs",
             **catalog_provenance,
         },
@@ -898,6 +898,7 @@ async def run(args: argparse.Namespace) -> int:
         connector=TCPConnector(limit=0),
         trust_env=False,
         auto_decompress=False,
+        headers={"Accept-Encoding": "identity"},
     ) as session:
         if args.mode == "smoke":
             await smoke(session, args)
