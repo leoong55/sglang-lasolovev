@@ -39,6 +39,9 @@ def main():
     flags = ["-O3", "-std=c++17", "-use_fast_math", "--expt-relaxed-constexpr",
              "--expt-extended-lambda", "-DCUTE_USE_PACKED_TUPLE=1",
              "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+             # Match the native sgl_kernel build, undo cpp_extension defaults.
+             "-U__CUDA_NO_HALF_OPERATORS__", "-U__CUDA_NO_HALF_CONVERSIONS__",
+             "-U__CUDA_NO_BFLOAT16_CONVERSIONS__", "-U__CUDA_NO_HALF2_OPERATORS__",
              "-gencode=arch=compute_90a,code=sm_90a"]
     # Explicit architecture prevents probing for GPUs inside docker build.
     path = load(name="glm53_cutlass", sources=[str(root / "glm53_w4a8.cu")],
