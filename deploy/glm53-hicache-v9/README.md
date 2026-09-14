@@ -1,11 +1,16 @@
-Current patch: **v9.12, based directly on v9.10** (`1f1171df23c98755c7d479d8befe071a9e13ecbe`).
-See [v9.12: Humming + DFlash, native EAGLE and build/run commands](benchmarks/V9.12-SPECULATION.md).
-The default Docker base is the existing v9.10 image. No custom CUTLASS extension,
-nvcc build, Torch/CUDA/Humming upgrade or model download is added. The stock
-CUTLASS runner from v9.10 remains selectable. GPU validation is outstanding.
+Current candidate: **v9.13, based on v9.12** (`3e2b2c5c5176fbf665631b6a1f4961b337707965`).
+See [v9.13 audit, evidence, build and short validation](benchmarks/V9.13-AUDIT.md).
+The Docker base is the existing v9.12 image, with an exact-hash v9.10 fallback.
+The build installs the Python overlay and checks it; it adds no nvcc/CUTLASS
+compilation, dependency upgrade or model download. Humming remains opt-in,
+and stock CUTLASS stays available. GPU validation is outstanding.
 
-**The remaining sections are historical and their image/build instructions
-describe earlier releases. Use the v9.12 document and manifests 05–09.**
+Use manifests 05–10: CP8/DCP4 with speculation off, DFlash2 (block 8), bounded
+profiling, native EAGLE on TP8, and optional DFlash2 block 4. The DFlash defaults
+warn on an eager fallback. All these comparison manifests include decode bucket 40.
+
+**The remaining sections are historical. Use the v9.13 document for current
+build and run commands.**
 
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 

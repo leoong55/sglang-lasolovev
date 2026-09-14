@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.10-0bcd822377da
+ARG BASE_IMAGE=i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.12-0bcd822377da
 FROM ${BASE_IMAGE}
 LABEL org.opencontainers.image.source="https://github.com/leoong55/sglang-lasolovev"
 USER root

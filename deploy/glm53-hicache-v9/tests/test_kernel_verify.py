@@ -18,7 +18,7 @@ spec.loader.exec_module(kernel)
 class VerifyIndexTest(unittest.TestCase):
     def test_causal_owner_filter_across_pages_padding_and_graph_widths(self):
         device = "cpu" if os.environ.get("TRITON_INTERPRET") == "1" else "cuda"
-        for width in (2, 8, 16):
+        for width in (2, 4, 8, 16):
             prefix = [0, 63, 256]
             rows = len(prefix) * width
             table_width = 320

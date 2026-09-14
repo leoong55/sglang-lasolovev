@@ -20,7 +20,7 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: /metrics
-        glm53-test-profile: v9.12-06-humming-c80-dflash.yaml
+        glm53-test-profile: v9.13-06-humming-c80-dflash.yaml
     spec:
       containers:
       - args:
@@ -86,6 +86,7 @@ spec:
         - '8'
         - '16'
         - '32'
+        - '40'
         - '48'
         - '64'
         - '80'
@@ -126,7 +127,7 @@ spec:
         - --speculative-dflash-block-size
         - '8'
         - --glm53-dflash-graph-policy
-        - require
+        - warn
         command:
         - python3
         - /opt/glm53-cp8-dcp4-v1/launch.py
@@ -179,7 +180,7 @@ spec:
           value: '1'
         - name: SGLANG_GLM53_PREFILL_BCG_PADDING
           value: '1'
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.12-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.13-0bcd822377da
         imagePullPolicy: IfNotPresent
         name: sglang
         ports:
