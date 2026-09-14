@@ -542,8 +542,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             self.draft_model.lm_head = lm_head
             if self.ps.tp_rank == 0:
                 logger.info(
-                    "DFLASH selector decode (greedy + sampling) folded into the "
-                    "draft cuda graph."
+                    "DFLASH selector decode (greedy + sampling): capture hook "
+                    "registered; actual replay is reported by GLM53 DFLASH execution."
                 )
             return _SelectorDraftSampler(
                 draft_model=self.draft_model,
@@ -571,7 +571,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             org_vocab_start = int(shard.org_vocab_start_index)
         if self.ps.tp_rank == 0:
             logger.info(
-                "DFLASH draft greedy head folded into the draft cuda graph (tp=%d).",
+                "DFLASH draft greedy head capture hook registered (tp=%d); "
+                "actual replay is reported by GLM53 DFLASH execution.",
                 tp_group.world_size,
             )
         return _DflashDraftSampler(
@@ -2087,7 +2088,15 @@ class DFlashWorkerV2(BaseSpecWorker):
             spec_algorithm=SpeculativeAlgorithm.DFLASH,
             spec_info=self._draft_block_spec_info,
             capture_hidden_mode=CaptureHiddenMode.NULL,
+            can_run_decode_cuda_graph=batch.can_run_decode_cuda_graph,
         )
+        # DSA CP enables the MLP synchronization machinery even with DP=1.
+        # Unlike target verify, this batch does not pass through init_new().
+        # Carry the scheduler's vote AND scale its request counts by the draft
+        # width through the same method used by target verify. Leaving the vote
+        # at False rejects every draft replay; forcing it True would bypass the
+        # scheduler's cross-rank agreement. This also preserves eager fallback.
+        forward_batch.init_mlp_sync_metadata(batch, self.device)
 
         if self.selector is not None:
             self._selector_sample = None
@@ -2191,6 +2200,9 @@ class DFlashWorkerV2(BaseSpecWorker):
         diagnostics.graph_status(
             bs=bs, width=block_size, draft=draft_out.can_run_graph,
             verify=can_run_cuda_graph, sampler=folded,
+            draft_runner=self.draft_model_runner.decode_cuda_graph_runner,
+            draft_batch=forward_batch,
+            verify_runner=self.model_runner.decode_cuda_graph_runner,
         )
 
         grammar_mask = None

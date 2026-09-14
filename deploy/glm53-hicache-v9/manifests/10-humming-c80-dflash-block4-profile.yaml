@@ -20,7 +20,7 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: /metrics
-        glm53-test-profile: v9.13-05-humming-c80-nospec.yaml
+        glm53-test-profile: v9.13-10-humming-c80-dflash-block4-profile.yaml
     spec:
       containers:
       - args:
@@ -115,7 +115,23 @@ spec:
         - --glm53-profile
         - cp8-dcp4
         - --glm53-draft-cache-window
-        - '0'
+        - '2048'
+        - --speculative-algorithm
+        - DFLASH
+        - --speculative-draft-model-path
+        - incoai/GLM-5.3-DFlash2
+        - --speculative-draft-model-quantization
+        - unquant
+        - --speculative-draft-attention-backend
+        - fa4
+        - --speculative-dflash-block-size
+        - '4'
+        - --glm53-dflash-graph-policy
+        - warn
+        - --glm53-dflash-profile-steps
+        - '32'
+        - --glm53-dflash-profile-min-bs
+        - '80'
         command:
         - python3
         - /opt/glm53-cp8-dcp4-v1/launch.py
@@ -129,7 +145,7 @@ spec:
         - name: SGLANG_GLM53_PREFILL_BCG
           value: '1'
         - name: SGLANG_GLM53_DFLASH_DCP
-          value: '0'
+          value: '1'
         - name: SGLANG_GLM53_HICACHE_DCP
           value: '1'
         - name: SGLANG_ENABLE_UNIFIED_RADIX_TREE
@@ -155,9 +171,9 @@ spec:
         - name: SGLANG_GLM53_CP_DECODE_FUSION
           value: '0'
         - name: SGLANG_GLM53_DRAFT_CACHE_WINDOW
-          value: '0'
+          value: '2048'
         - name: SGLANG_GLM53_BOUNDED_DRAFT_FASTPATH
-          value: '0'
+          value: '1'
         - name: SGLANG_HUMMING_MOE_GEMM_TYPE
           value: indexed
         - name: SGLANG_HUMMING_USE_F16_ACCUM

@@ -74,11 +74,21 @@ class SpecProfilesTest(unittest.TestCase):
                replace_value(self.argv("EAGLE"), "--speculative-draft-attention-backend", "fa4"),
                replace_value(self.argv("EAGLE"), "--speculative-eagle-topk", 2),
                replace_value(self.argv("EAGLE"), "--speculative-num-draft-tokens", 8),
-               replace_value(self.argv("DFLASH"), "--speculative-dflash-block-size", 4),
+               replace_value(self.argv("DFLASH"), "--speculative-dflash-block-size", 16),
                self.argv("DFLASH") + ["--speculative-num-steps", "3"]]
         for argv in bad:
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 self.check(argv)
+
+    def test_bounded_widths_keep_standard_runtime_block_override(self):
+        for width in (2, 4, 8):
+            argv = replace_value(self.argv("DFLASH"), "--speculative-dflash-block-size", width)
+            self.assertEqual(self.check(argv).speculative_dflash_block_size, width)
+            runtime = launch.runtime_argv(argv)
+            self.assertEqual(runtime[runtime.index("--speculative-dflash-block-size") + 1], str(width))
+        for width in (1, 3, 9, 16):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.check(replace_value(self.argv("DFLASH"), "--speculative-dflash-block-size", width))
 
     def test_missing_mtp_weights_or_shards_fail_before_gpu_load(self):
         launch.validate_mtp_checkpoint(self.model)

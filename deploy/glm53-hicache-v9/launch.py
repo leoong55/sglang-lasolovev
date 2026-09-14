@@ -113,8 +113,8 @@ def check_profile(argv):
         widths = [n for n in (args.speculative_num_draft_tokens, args.speculative_dflash_block_size) if n is not None]
         if any(n < 2 for n in widths) or len(set(widths)) > 1:
             p.error("DFLASH block widths must agree and be at least 2")
-        if args.glm53_draft_cache_window and any(n != 8 for n in widths):
-            p.error("Bounded GLM53 draft requires block size 8")
+        if args.glm53_draft_cache_window and any(n not in (2, 4, 8) for n in widths):
+            p.error("Bounded GLM53 draft supports block size 2, 4 or 8")
     elif args.speculative_algorithm == "EAGLE":
         if args.glm53_profile != "tp8":
             p.error("EAGLE/MTP requires --glm53-profile tp8 and DCP1; the CP8/DCP4 speculative path implements DFLASH only")

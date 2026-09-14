@@ -168,8 +168,8 @@ class GLM53BoundedDraftPool(MHATokenToKVPool):
             self.backing_valid[ids_cpu] = True
         self.logical_versions[virtual] += 1
         if is_decode:
-            # The worker submits one accepted prefix of an 8-row block per
-            # request. Eight consecutive positions cannot lap the 2560-row
+            # The worker submits one accepted prefix of an at-most-8-row block
+            # per request. Eight consecutive positions cannot lap the 2560-row
             # ring, including a modulo wrap. Every supplied row must be kept.
             # Avoid a scatter-reduce and four more dynamic boolean gathers.
             ids = virtual
@@ -195,8 +195,8 @@ class GLM53BoundedDraftPool(MHATokenToKVPool):
         Runs before model_runner.forward, never inside a CUDA graph. Persistent
         ring rows survive ordinary decode; only misses/relocations load from CPU.
         """
-        if block_size != 8:
-            raise ValueError("Bounded GLM53 draft requires block_size=8")
+        if block_size not in (2, 4, 8):
+            raise ValueError("Bounded GLM53 draft supports block_size=2, 4 or 8")
         if (self.layer_transfer_counter is not None
                 and self.layer_transfer_counter.consumer_index >= 0):
             self.layer_transfer_counter.wait_until(self.layer_num - 1)

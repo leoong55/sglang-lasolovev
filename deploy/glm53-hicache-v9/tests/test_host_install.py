@@ -48,8 +48,8 @@ class TestInstaller(unittest.TestCase):
         self.assertEqual((self.root / "srt/existing.py").read_bytes(), self.updated)
         self.assertEqual((self.root / "srt/added.py").read_bytes(), self.added)
 
-    def test_only_hash_matched_v910_overlay_is_accepted(self):
-        previous = b"VALUE = 'v910'\n"
+    def test_only_hash_matched_v912_overlay_is_accepted(self):
+        previous = b"VALUE = 'v912'\n"
         manifest_path = self.bundle / "base-files.json"
         manifest = json.loads(manifest_path.read_text())
         for row in manifest["files"]:
@@ -59,6 +59,23 @@ class TestInstaller(unittest.TestCase):
         (self.root / "srt/existing.py").write_bytes(previous)
         with self.assertRaisesRegex(RuntimeError, "Source mismatch"):
             self.installer.install(self.root, self.bundle, verify_only=True)
+        self.installer.install(self.root, self.bundle)
+        self.installer.install(self.root, self.bundle, verify_only=True)
+
+    def test_v910_compatibility_requires_a_separate_exact_hash(self):
+        previous = b"VALUE = 'v910'\n"
+        manifest_path = self.bundle / "base-files.json"
+        manifest = json.loads(manifest_path.read_text())
+        for row in manifest["files"]:
+            if row["path"].endswith("existing.py"):
+                row["previous_sha256"] = self.installer.digest(b"VALUE = 'v912'\n")
+                row["compatible_sha256"] = [self.installer.digest(previous)]
+        manifest_path.write_text(json.dumps(manifest))
+        (self.root / "srt/existing.py").write_bytes(previous + b"# local modification\n")
+        with self.assertRaisesRegex(RuntimeError, "Source mismatch"):
+            self.installer.install(self.root, self.bundle)
+        self.assertFalse((self.root / "srt/added.py").exists())
+        (self.root / "srt/existing.py").write_bytes(previous)
         self.installer.install(self.root, self.bundle)
         self.installer.install(self.root, self.bundle, verify_only=True)
 

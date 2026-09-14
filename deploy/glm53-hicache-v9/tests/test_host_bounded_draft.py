@@ -375,6 +375,51 @@ class BoundedDraftTest(unittest.TestCase):
         self.prepare_owned(pool, table, draft, [replacement], [4096])
         self.assertEqual(pool.window_checks, before + 1)
 
+    def test_short_blocks_preserve_window_across_wrap_and_rejected_scratch(self):
+        for width in (2, 4, 8):
+            with self.subTest(width=width):
+                pool = self.pool(logical=10000, requests=1)
+                pool.fastpath_enabled = True
+                end = 5090  # crosses both a page boundary and the ring wrap
+                ids = torch.arange(end)
+                self.commit(pool, ids, 1, ids, self.data(end))
+                target = torch.zeros(2, 10000, dtype=torch.int32)
+                target[1, :end] = ids.int()
+                draft = torch.zeros_like(target)
+                owner = self.owner(1, ids)
+                for step in range(100):
+                    visible, scratch = pool.prepare_window(
+                        target_table=target, draft_table=draft,
+                        request_ids=torch.tensor([1]), prefix_lens=torch.tensor([end]),
+                        block_size=width, request_owners=[owner],
+                    )
+                    size = int(visible[0])
+                    slots = draft[1, :size].long()
+                    reference = target[1, end-size:end].long()
+                    self.assertTrue(torch.equal(pool.k_buffer[0][slots], pool.backing[reference, 0, 0]))
+                    self.assertTrue(torch.equal(pool.v_buffer[5][slots], pool.backing[reference, 5, 1]))
+                    self.assertEqual(scratch.numel(), width)
+                    self.assertFalse(bool(torch.isin(scratch, slots).any()))
+                    # Simulate draft attention writing every proposed row.
+                    pool._put_gpu(scratch, torch.full_like(self.data(width), -17))
+                    count = 1 + step % width
+                    pos = torch.arange(end, end + count)
+                    target[1, pos] = pos.int()
+                    pool.commit_context(virtual=pos, requests=torch.ones_like(pos),
+                                        positions=pos, payload=self.data(count, step), is_decode=True)
+                    self.assertFalse(bool(pool.backing_valid[end+count:end+width].any()))
+                    end += count
+                self.assertEqual(pool.window_checks, 1)
+                self.assertEqual(pool.window_reuses, 99)
+
+    def test_pool_rejects_unreviewed_widths(self):
+        pool = self.pool()
+        table = torch.zeros(3, 4096, dtype=torch.int32)
+        for width in (0, 1, 3, 9, 16, 256):
+            with self.assertRaisesRegex(ValueError, "block_size"):
+                pool.prepare_window(target_table=table, draft_table=table.clone(),
+                    request_ids=torch.tensor([1]), prefix_lens=torch.tensor([0]), block_size=width)
+
     def test_late_prefill_radix_repoint_reloads_different_cached_values(self):
         pool = self.pool()
         pool.fastpath_enabled = True
