@@ -1,0 +1,196 @@
+{
+  "profile": "glm53-pp2-humming-v1",
+  "base_commit": "0bcd822377da7b5718e674eaf9c870d349424dd1",
+  "pp2_branch_commit": "eeec88d3467de518d46b27680ce70d4361a4f422",
+  "humming_source_commit": "1f1171df23c98755c7d479d8befe071a9e13ecbe",
+  "files": [
+    {
+      "path": "srt/arg_groups/cuda_graph_hook.py",
+      "base_sha256": "a234ccf4f8f23328a18ed72ea4c7313286e6b205921d8bcea128e6fb0372defa",
+      "sha256": "a234ccf4f8f23328a18ed72ea4c7313286e6b205921d8bcea128e6fb0372defa"
+    },
+    {
+      "path": "srt/arg_groups/hicache_hook.py",
+      "base_sha256": "78585b2444ed8c00e3e6732f6af54431662154a9486046dd0d0a2f9ca7283375",
+      "sha256": "78585b2444ed8c00e3e6732f6af54431662154a9486046dd0d0a2f9ca7283375"
+    },
+    {
+      "path": "srt/arg_groups/memory_hook.py",
+      "base_sha256": "91086cb29f78d52ed7a8e6cc3367adbaea62ca20619392e5e131bf7a2214085d",
+      "sha256": "91086cb29f78d52ed7a8e6cc3367adbaea62ca20619392e5e131bf7a2214085d"
+    },
+    {
+      "path": "srt/arg_groups/moe_hook.py",
+      "base_sha256": "c79df35783c3cc6356e95fab2d5f35186728d17727204a79c6907ff420006c95",
+      "sha256": "c79df35783c3cc6356e95fab2d5f35186728d17727204a79c6907ff420006c95"
+    },
+    {
+      "path": "srt/arg_groups/overrides.py",
+      "base_sha256": "af4086d5c3bbfc8789d82b196240226785c104809c48cb1f9a24f6962cafe4ac",
+      "sha256": "af4086d5c3bbfc8789d82b196240226785c104809c48cb1f9a24f6962cafe4ac"
+    },
+    {
+      "path": "srt/arg_groups/parallel_hook.py",
+      "base_sha256": "ef212300c25a119138fb30199e05aefedc63f65d376e1d2e0cd6d612a07180a9",
+      "sha256": "ef212300c25a119138fb30199e05aefedc63f65d376e1d2e0cd6d612a07180a9"
+    },
+    {
+      "path": "srt/arg_groups/speculative_hook.py",
+      "base_sha256": "995d75e29bbad7726e816b85c6a8830e8db99a261997ec4d53997950f369395b",
+      "sha256": "995d75e29bbad7726e816b85c6a8830e8db99a261997ec4d53997950f369395b"
+    },
+    {
+      "path": "srt/arg_groups/validation_hook.py",
+      "base_sha256": "8c2663b552693c84b80b83fa29aaa210557a4bcc3ad88870f09d6f00a9995517",
+      "sha256": "8c2663b552693c84b80b83fa29aaa210557a4bcc3ad88870f09d6f00a9995517"
+    },
+    {
+      "path": "srt/environ.py",
+      "base_sha256": "a39ae8475f2bff6e5cea99f0675bcb6d6647c07540b4b5be65fa7b0b916327cd",
+      "sha256": "a39ae8475f2bff6e5cea99f0675bcb6d6647c07540b4b5be65fa7b0b916327cd"
+    },
+    {
+      "path": "srt/layers/moe/cutlass_w4a8_moe.py",
+      "base_sha256": "101aaaa17a6eb92607dfad09007efe106d6e01a52d2bcf3da36e635c0d6d6fa5",
+      "sha256": "101aaaa17a6eb92607dfad09007efe106d6e01a52d2bcf3da36e635c0d6d6fa5"
+    },
+    {
+      "path": "srt/layers/moe/moe_runner/humming.py",
+      "base_sha256": "da8b5d99a6a07205e6ca8318821ea5e2938914288bacd8d3adbbdf0fee043a04",
+      "sha256": "0d7610bfb55195678ac9ca7ad34848b50ae4540e1c4f06c095b9a84045d0cacf"
+    },
+    {
+      "path": "srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a8_fp8_moe.py",
+      "base_sha256": "adafb1332d0317a062ce6ad798cfef138756ce2bfed23e92696acd93e021dd27",
+      "sha256": "adafb1332d0317a062ce6ad798cfef138756ce2bfed23e92696acd93e021dd27"
+    },
+    {
+      "path": "srt/layers/quantization/humming.py",
+      "base_sha256": "fd35698e12d1bff317cdfd5cf028c05efe4a7bc3f290c808926e1b0857fafb90",
+      "sha256": "fd35698e12d1bff317cdfd5cf028c05efe4a7bc3f290c808926e1b0857fafb90"
+    },
+    {
+      "path": "srt/layers/quantization/humming_utils.py",
+      "base_sha256": "c52099ccf8e848482757362448546d2b2e431a0dcb57a25a5f29924575413a55",
+      "sha256": "c52099ccf8e848482757362448546d2b2e431a0dcb57a25a5f29924575413a55"
+    },
+    {
+      "path": "srt/layers/quantization/w4afp8.py",
+      "base_sha256": "21e9c527c9b83e350cdc35ce2bc62891cda1550934b2a5d302f0f807f752f125",
+      "sha256": "b4fcef4ff0e2e37d3c54ef1671945deb2ca3e31ad49ea6c8cdb062c4b5484d7d"
+    },
+    {
+      "path": "srt/layers/quantization/w4afp8_humming.py",
+      "base_sha256": null,
+      "sha256": "b1e6f7b4bbc021a64279a5a4074e08f441c32439bf450c9db105d8b2151cc148"
+    },
+    {
+      "path": "srt/managers/schedule_batch.py",
+      "base_sha256": "170f847aba6701d8d876a98c5edb8a66f188f5bc12fc30973596d132fcbb8c72",
+      "sha256": "170f847aba6701d8d876a98c5edb8a66f188f5bc12fc30973596d132fcbb8c72"
+    },
+    {
+      "path": "srt/managers/schedule_policy.py",
+      "base_sha256": "5ceae6ad98493297bf557fdb38b6e53f654319e26238c9e4e22a00aead230e3c",
+      "sha256": "5ceae6ad98493297bf557fdb38b6e53f654319e26238c9e4e22a00aead230e3c"
+    },
+    {
+      "path": "srt/managers/scheduler.py",
+      "base_sha256": "3a12fdfb9c21571d8007ba60aedd7e84b67636583bac8243373c75d6a2ab324e",
+      "sha256": "3a12fdfb9c21571d8007ba60aedd7e84b67636583bac8243373c75d6a2ab324e"
+    },
+    {
+      "path": "srt/managers/scheduler_components/dp_attn.py",
+      "base_sha256": "7b8f8adc737eba4f812018a944ee7642da8380521c22476fa5bae58002baf410",
+      "sha256": "7b8f8adc737eba4f812018a944ee7642da8380521c22476fa5bae58002baf410"
+    },
+    {
+      "path": "srt/managers/scheduler_pp_mixin.py",
+      "base_sha256": "32ae89f013d88347152f8c8ab61e28839ebb0fe7960593d9c0a76bf238b163f1",
+      "sha256": "32ae89f013d88347152f8c8ab61e28839ebb0fe7960593d9c0a76bf238b163f1"
+    },
+    {
+      "path": "srt/mem_cache/hiradix_cache.py",
+      "base_sha256": "b60ebd1b63eee2c9e8a66b672fca00f338625929d9ec77a515d1c291551c2395",
+      "sha256": "b60ebd1b63eee2c9e8a66b672fca00f338625929d9ec77a515d1c291551c2395"
+    },
+    {
+      "path": "srt/mem_cache/hybrid_cache/hybrid_pool_assembler.py",
+      "base_sha256": "739cf020ceaffe6698c3b4e92044606f87263f6ab92bcefd811b294cf800ef7b",
+      "sha256": "739cf020ceaffe6698c3b4e92044606f87263f6ab92bcefd811b294cf800ef7b"
+    },
+    {
+      "path": "srt/mem_cache/kv_cache_configurator.py",
+      "base_sha256": "40a4d40ba17dbd5065048a96077484b3158a26c00638a087c4678569597f5f04",
+      "sha256": "40a4d40ba17dbd5065048a96077484b3158a26c00638a087c4678569597f5f04"
+    },
+    {
+      "path": "srt/mem_cache/memory_pool.py",
+      "base_sha256": "7955db1470ea36b99eb43483a5bd999dbda62119ff54aee7f9e8e01f31b2a9b5",
+      "sha256": "7955db1470ea36b99eb43483a5bd999dbda62119ff54aee7f9e8e01f31b2a9b5"
+    },
+    {
+      "path": "srt/mem_cache/pool_host/base.py",
+      "base_sha256": "14498937a59d3747028a6250840ae9d8f5f5f960da2731083af2fd801d7f795b",
+      "sha256": "14498937a59d3747028a6250840ae9d8f5f5f960da2731083af2fd801d7f795b"
+    },
+    {
+      "path": "srt/mem_cache/pool_host/dsa.py",
+      "base_sha256": "aa408d25423fb3ecc30c6a0392a6550f520904634d66d00ca7cbdd9096a7d9c8",
+      "sha256": "aa408d25423fb3ecc30c6a0392a6550f520904634d66d00ca7cbdd9096a7d9c8"
+    },
+    {
+      "path": "srt/mem_cache/pool_host/mla.py",
+      "base_sha256": "b0aa464a0e0b9e3a10f92dbaf3dba1d198839997c69a2802acaa280de05cbb7e",
+      "sha256": "b0aa464a0e0b9e3a10f92dbaf3dba1d198839997c69a2802acaa280de05cbb7e"
+    },
+    {
+      "path": "srt/model_executor/cuda_graph_config.py",
+      "base_sha256": "9f9250e3c4f9a36e6bd95aea9b57e76068b780ef38a6317c3b6240c0fcd3916d",
+      "sha256": "9f9250e3c4f9a36e6bd95aea9b57e76068b780ef38a6317c3b6240c0fcd3916d"
+    },
+    {
+      "path": "srt/model_executor/model_runner_components/cuda_graph_setup.py",
+      "base_sha256": "a6bb22c298b80d5afd41d89b32b268dae727bd726207e39ab270c0fae92f9029",
+      "sha256": "a6bb22c298b80d5afd41d89b32b268dae727bd726207e39ab270c0fae92f9029"
+    },
+    {
+      "path": "srt/model_executor/model_runner_components/layer_setup.py",
+      "base_sha256": "c193cfa4354dd338bcd23bb39919921e78aee44e6a45b67a092c3ef003666dd4",
+      "sha256": "c193cfa4354dd338bcd23bb39919921e78aee44e6a45b67a092c3ef003666dd4"
+    },
+    {
+      "path": "srt/model_executor/pool_configurator.py",
+      "base_sha256": "6ea48e3d6c474a4c868d172056e046fa137fadd251913dda4a6431b3aa1ca5fd",
+      "sha256": "6ea48e3d6c474a4c868d172056e046fa137fadd251913dda4a6431b3aa1ca5fd"
+    },
+    {
+      "path": "srt/model_executor/runner/decode_cuda_graph_runner.py",
+      "base_sha256": "4f9b185ed058b8a6fb1e1d803ab17840a618af5d5816e534fbcdb6f67878072d",
+      "sha256": "4f9b185ed058b8a6fb1e1d803ab17840a618af5d5816e534fbcdb6f67878072d"
+    },
+    {
+      "path": "srt/model_executor/runner/prefill_cuda_graph_runner.py",
+      "base_sha256": "15164900336642f0dfc6fe25e17294fa75368f734b32b19f91897e056dbf16a6",
+      "sha256": "15164900336642f0dfc6fe25e17294fa75368f734b32b19f91897e056dbf16a6"
+    },
+    {
+      "path": "srt/models/deepseek_v2.py",
+      "base_sha256": "8fa0cfb8e8d61b7e41680fb19a3d83bd00e0a1c2d7403b42e0a0db259b308c0b",
+      "sha256": "8fa0cfb8e8d61b7e41680fb19a3d83bd00e0a1c2d7403b42e0a0db259b308c0b"
+    },
+    {
+      "path": "srt/models/glm4_moe.py",
+      "base_sha256": "d790f5d4aec262e6872755f10dcdf8f8fd79a80789a14914288f6026641fab5f",
+      "sha256": "d790f5d4aec262e6872755f10dcdf8f8fd79a80789a14914288f6026641fab5f"
+    },
+    {
+      "path": "srt/server_args.py",
+      "base_sha256": "204fe57ba81acc25b7badcabf3b4b741021767c91f1d64e0df949cb175464b7c",
+      "sha256": "204fe57ba81acc25b7badcabf3b4b741021767c91f1d64e0df949cb175464b7c"
+    }
+  ],
+  "forbidden_paths": [
+    "srt/managers/pp_full_need.py"
+  ]
+}
