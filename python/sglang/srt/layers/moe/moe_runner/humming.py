@@ -201,7 +201,16 @@ class HummingRunnerCore(MoeRunnerCore):
         if expected_m is not None:
             return expected_m * self.num_experts
 
-        # TODO: update for EP and DP
+        if getattr(self.layer, "_humming_standard_ep_aware", False):
+            # This is a launch heuristic, not a count or an allocation bound.
+            # Standard EP keeps [tokens, top_k] including remote (-1) slots.
+            # Read no GPU values here: capture and skewed/empty local routes
+            # must keep using the full buffers and actual GPU routing metadata.
+            return max(
+                1,
+                (topk_ids.nelement() * self.num_experts + self.global_num_experts - 1)
+                // self.global_num_experts,
+            )
         return topk_ids.nelement()
 
     def get_buffer_metas(

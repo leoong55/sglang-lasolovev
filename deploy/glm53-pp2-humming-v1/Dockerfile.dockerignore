@@ -1,0 +1,16 @@
+**
+!deploy/
+!deploy/glm53-pp2-humming-v1/
+!deploy/glm53-pp2-humming-v1/**
+!python/
+!python/sglang/
+!python/sglang/srt/
+!python/sglang/srt/layers/
+!python/sglang/srt/layers/quantization/
+!python/sglang/srt/layers/quantization/w4afp8.py
+!python/sglang/srt/layers/quantization/w4afp8_humming.py
+!python/sglang/srt/layers/moe/
+!python/sglang/srt/layers/moe/moe_runner/
+!python/sglang/srt/layers/moe/moe_runner/humming.py
+**/__pycache__/
+**/*.pyc
