@@ -556,6 +556,9 @@ class Envs:
     # ===================================================================
     # Scheduler token budgeting and admission
     # ===================================================================
+    # H200 archive experiments; opt-in and independent of the decode kernels.
+    SGLANG_ENABLE_H200_PARK_CHUNKED_PREFILL = EnvBool(False)
+    SGLANG_ENABLE_H200_SKIP_NOT_FITTING = EnvBool(False)
     SGLANG_INIT_NEW_TOKEN_RATIO = EnvFloat(0.7)
     SGLANG_MIN_NEW_TOKEN_RATIO_FACTOR = EnvFloat(0.14)
     SGLANG_NEW_TOKEN_RATIO_DECAY_STEPS = EnvInt(600)

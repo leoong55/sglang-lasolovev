@@ -986,6 +986,17 @@ class PrefillAdder:
             if _rem_tokens <= 0:
                 if self.is_hybrid_swa:
                     return req
+                # Let an existing decode batch release memory before extending
+                # this chunk. Without a runnable decode batch, keep the native
+                # escape path so a lone chunk cannot park forever.
+                if (
+                    envs.SGLANG_ENABLE_H200_PARK_CHUNKED_PREFILL.get()
+                    and int(self.rem_total_tokens) <= 0
+                    and self.running_batch is not None
+                    and not self.running_batch.is_empty()
+                    and not self.running_batch.is_prefill_only
+                ):
+                    return req
                 _rem_tokens = self.rem_chunk_tokens
 
         # A mid-chunk rank prefills this pass regardless of the delayer

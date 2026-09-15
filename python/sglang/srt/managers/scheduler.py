@@ -3741,6 +3741,18 @@ class Scheduler(
                             req.kv.mamba_pool_idx.unsqueeze(-1)
                         )
                         req.kv.mamba_pool_idx = None
+                # NO_TOKEN can reject this candidate while a smaller one fits.
+                # Only retry before admission, after native cleanup, and while
+                # all global budgets still allow another candidate. Clear the
+                # flag above; otherwise the next loop iteration stops at once.
+                if (
+                    envs.SGLANG_ENABLE_H200_SKIP_NOT_FITTING.get()
+                    and res == AddReqResult.NO_TOKEN
+                    and not added
+                    and adder.budget_state() == AddReqResult.CONTINUE
+                ):
+                    running_batch.batch_is_full = False
+                    continue
                 break
 
         if mamba_allocator is not None:
