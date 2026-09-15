@@ -78,6 +78,10 @@ class Measurement(unittest.TestCase):
         rows=self.rows(); rows[0]['events']=[[10,300]]
         self.assertFalse(bench.summarize(rows)['valid'])
 
+    def test_declared_lazy_counter_starts_at_zero(self):
+        self.assertEqual(bench.retract_counter('# TYPE sglang:num_retracted_requests_total counter'),0)
+        self.assertIsNone(bench.retract_counter(''))
+
     def test_retraction_counter_is_not_a_gauge_or_creation_timestamp(self):
         self.assertEqual(bench.retract_counter('sglang:num_retracted_reqs 9\nsglang:num_retracted_requests_total{rank="0"} 2\nsglang:num_retracted_requests_created 999'),2)
 

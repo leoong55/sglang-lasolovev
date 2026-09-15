@@ -7,9 +7,23 @@ permissions:
   contents: read
 concurrency:
   group: glm53-h200-ab-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Check formatting of the new kit
+        run: |
+          python3 -m pip install black==26.1.0 isort==7.0.0
+          python3 -m isort deploy/glm53-h200-ab-v1
+          python3 -m black deploy/glm53-h200-ab-v1
+          git diff --exit-code -- deploy/glm53-h200-ab-v1
   image:
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

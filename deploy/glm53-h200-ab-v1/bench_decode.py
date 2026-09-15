@@ -28,7 +28,8 @@ def prepare(a):
     data={'seed':a.seed, 'input_tokens':a.input_tokens, 'output_tokens':a.output_tokens,
           'tokenizer_vocab_sha256':sha(json.dumps(sorted(tok.get_vocab().items())).encode()),
           'requests':[rng.choices(vocab,k=a.input_tokens) for _ in range(a.concurrency)]}
-    Path(a.output).write_text(json.dumps(data,separators=(',',':'))+'\n')
+    with Path(a.output).open('x') as f:
+        f.write(json.dumps(data,separators=(',',':'))+'\n')
     print(sha(Path(a.output).read_bytes()))
 
 
@@ -74,7 +75,13 @@ def summarize(rows, warmup=64, min_window=10):
 
 def retract_counter(text):
     rows=[line for line in text.splitlines() if line.startswith('sglang:num_retracted_requests_total')]
-    return sum(float(x.split()[-1]) for x in rows) if rows else None
+    if rows:
+        return sum(float(x.split()[-1]) for x in rows)
+    # Prometheus declares a labelled Counter before the first .labels().inc().
+    # A declared but not yet instantiated family has observed zero events.
+    if '# TYPE sglang:num_retracted_requests_total counter' in text:
+        return 0.0
+    return None
 
 
 async def run(a):
