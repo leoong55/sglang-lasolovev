@@ -36,16 +36,18 @@ def main():
         pool.kv_lora_rank = 512
         pool.qk_rope_head_dim = tail
         pool.dsa_kv_cache_store_fp8 = True
-        raw = torch.empty_like(kv_source, dtype=torch.float8_e4m3fn)
+        raw = torch.zeros_like(kv_source, dtype=torch.float8_e4m3fn)
         loc = torch.arange(4096, device="cuda", dtype=torch.int64)
         pool._write_mla_kv_buffer(
             raw.view(torch.uint8), loc, kv_source[:, :, :512], kv_source[:, :, 512:]
         )
+        # Runtime reserves slot zero; the writer deliberately skips it.
         torch.testing.assert_close(
-            raw.float(), kv_source.to(raw.dtype).float(), rtol=0, atol=0
+            raw[1:].float(), kv_source[1:].to(raw.dtype).float(), rtol=0, atol=0
         )
+        assert torch.count_nonzero(raw[0].float()) == 0
         indices = torch.randint(
-            0, 4096, (seq, 1, 2048), device="cuda", dtype=torch.int32
+            1, 4096, (seq, 1, 2048), device="cuda", dtype=torch.int32
         )
         indices[:, :, -64:] = -1
         scale = dim**-0.5
