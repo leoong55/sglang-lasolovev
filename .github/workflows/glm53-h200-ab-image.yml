@@ -93,6 +93,7 @@ jobs:
           for profile in tp8-dcp4-decode pp4-decode pp4-archive; do
             python3 deploy/glm53-h200-ab-v1/render.py --image "$H200_IMAGE@$H200_DIGEST" --profile "$profile" > "image-artifacts/$profile.yaml"
           done
+          python3 deploy/glm53-h200-ab-v1/render.py --image "$H200_IMAGE@$H200_DIGEST" --profile pp4-archive --park --skip > image-artifacts/pp4-archive-patched.yaml
           python3 - <<'PY'
           import json, os
           from pathlib import Path
