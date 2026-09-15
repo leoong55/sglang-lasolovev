@@ -55,7 +55,7 @@ def install(root, bundle, verify_only=False):
         accepted.update(row.get("compatible_sha256", []))
         if verify_only or current not in accepted:
             raise RuntimeError(
-                f"Source mismatch: {target}; expected pinned base, verified v9.10/v9.12 or this exact patch"
+                f"Source mismatch: {target}; expected pinned base, verified v9.10/v9.12/v9.13 or this exact patch"
             )
         pending.append((target, old, new))
     changed = []

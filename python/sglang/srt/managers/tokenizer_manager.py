@@ -29,7 +29,7 @@ import threading
 import time
 from array import array
 from collections import deque
-from contextlib import nullcontext
+from contextlib import aclosing, nullcontext
 from datetime import datetime
 from enum import Enum
 from functools import lru_cache
@@ -240,6 +240,10 @@ class ReqState:
     # delta directly without rebuilding the full output prefix.
     text: str = ""
     text_chunks: List[str] = dataclasses.field(default_factory=list)
+
+    # GLM53_CANCEL_V1: distinguish validation failures from live scheduler work.
+    dispatched_to_scheduler: bool = False
+    abort_requested: bool = False
 
     def append_text(self, chunk: str):
         if chunk:
@@ -799,6 +803,10 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 )
 
         self._init_req_state(obj, request)
+        request_states = {
+            rid: self.rid_to_state[rid]
+            for rid in ([obj.rid] if obj.is_single else obj.rid)
+        }
         try:
             if get_disagg().language_only:
                 self._handle_epd_disaggregation_encode_request(obj)
@@ -819,20 +827,25 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     if obj.return_prompt_token_ids:
                         state.prompt_token_ids = list(tokenized_obj.input_ids)
                     self._send_one_request(tokenized_obj)
-                    async for response in self._wait_one_response(obj, request):
-                        yield response
+                    async with aclosing(
+                        self._wait_one_response(obj, request)
+                    ) as responses:
+                        async for response in responses:
+                            yield response
                 else:
-                    async for response in self._handle_batch_request(obj, request):
-                        yield response
+                    # async-for alone does not close a suspended inner generator.
+                    # Propagate SSE closure to sampled RIDs and their waiter tasks.
+                    async with aclosing(
+                        self._handle_batch_request(obj, request)
+                    ) as responses:
+                        async for response in responses:
+                            yield response
         except BaseException:
-            # _init_req_state created a rid_to_state entry per (sub-)request up
-            # front. The normal remover is the scheduler-response path
-            # (_handle_batch_output), so a failure *before* a request reaches the
-            # scheduler -- e.g. input-length validation rejecting an over-context
-            # request -- would otherwise leak those entries forever. Drop any that
-            # are still pending; entries already removed on the normal completion
-            # path are left untouched (pop is a no-op).
-            self._discard_pending_req_states(obj)
+            # CancelledError/GeneratorExit can happen AFTER scheduler dispatch.
+            # Abort live work while its state still exists; the terminal scheduler
+            # output owns cleanup. Only undispatched validation failures can be
+            # discarded immediately.
+            self._discard_pending_req_states(obj, expected_states=request_states)
             raise
 
     def _detect_input_format(
@@ -1570,6 +1583,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             tokenized_obj.wrap_pickle_fields()
             self._dispatch_to_scheduler(tokenized_obj)
             dispatched = True
+            state = self.rid_to_state.get(tokenized_obj.rid)
+            if state is not None:
+                state.dispatched_to_scheduler = True
             tokenized_obj.time_stats = time_stats
             tokenized_obj.time_stats.set_api_server_dispatch_finish_time()
         finally:
@@ -1602,6 +1618,10 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
 
             self._dispatch_to_scheduler(batch_req)
             dispatched = True
+            for tokenized_obj in tokenized_objs:
+                state = self.rid_to_state.get(tokenized_obj.rid)
+                if state is not None:
+                    state.dispatched_to_scheduler = True
             for tokenized_obj, time_stat in zip(tokenized_objs, time_stats):
                 tokenized_obj.time_stats = time_stat
             set_time_batch(tokenized_objs, "set_api_server_dispatch_finish_time")
@@ -1816,77 +1836,62 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         obj: Union[GenerateReqInput, EmbeddingReqInput],
         request: Optional[fastapi.Request] = None,
     ):
-        batch_size = obj.batch_size
+        spawned_states = {}
+        try:
+            batch_size = obj.batch_size
 
-        generators = []
-        rids = []
-        if getattr(obj, "parallel_sample_num", 1) == 1:
-            if self._should_use_batch_tokenization(batch_size, obj):
-                tokenized_objs = await self._batch_tokenize_and_process(batch_size, obj)
-                self._send_batch_request(tokenized_objs)
-
-                # Set up generators for each request in the batch
-                for i in range(batch_size):
-                    tmp_obj = obj[i]
-                    state = self.rid_to_state[tmp_obj.rid]
-                    if tmp_obj.return_prompt_token_ids:
-                        state.prompt_token_ids = list(tokenized_objs[i].input_ids)
-                    generators.append(self._wait_one_response(tmp_obj, request))
-                    rids.append(tmp_obj.rid)
-            else:
-                # Sequential tokenization and processing
-                with (
-                    input_blocker_guard_region(
-                        dispatch_to_scheduler=self._dispatch_to_scheduler,
+            generators = []
+            rids = []
+            if getattr(obj, "parallel_sample_num", 1) == 1:
+                if self._should_use_batch_tokenization(batch_size, obj):
+                    tokenized_objs = await self._batch_tokenize_and_process(
+                        batch_size, obj
                     )
-                    if get_bool_env_var("SGLANG_ENABLE_COLOCATED_BATCH_GEN")
-                    else nullcontext()
-                ):
+                    self._send_batch_request(tokenized_objs)
+
+                    # Set up generators for each request in the batch
                     for i in range(batch_size):
                         tmp_obj = obj[i]
-                        tokenized_obj = await self._tokenize_one_request(tmp_obj)
                         state = self.rid_to_state[tmp_obj.rid]
                         if tmp_obj.return_prompt_token_ids:
-                            state.prompt_token_ids = list(tokenized_obj.input_ids)
-                        self._send_one_request(tokenized_obj)
+                            state.prompt_token_ids = list(tokenized_objs[i].input_ids)
                         generators.append(self._wait_one_response(tmp_obj, request))
                         rids.append(tmp_obj.rid)
-        else:
-            # FIXME: When using batch and parallel_sample_num together, the perf is not optimal.
-            if batch_size > 128:
-                logger.warning(
-                    "Sending a single large batch with parallel sampling (n > 1) has not been well optimized. "
-                    "The performance might be better if you just duplicate the requests n times or use "
-                    "many threads to send them one by one with parallel sampling (n > 1)."
+                else:
+                    # Sequential tokenization and processing
+                    with (
+                        input_blocker_guard_region(
+                            dispatch_to_scheduler=self._dispatch_to_scheduler,
+                        )
+                        if get_bool_env_var("SGLANG_ENABLE_COLOCATED_BATCH_GEN")
+                        else nullcontext()
+                    ):
+                        for i in range(batch_size):
+                            tmp_obj = obj[i]
+                            tokenized_obj = await self._tokenize_one_request(tmp_obj)
+                            state = self.rid_to_state[tmp_obj.rid]
+                            if tmp_obj.return_prompt_token_ids:
+                                state.prompt_token_ids = list(tokenized_obj.input_ids)
+                            self._send_one_request(tokenized_obj)
+                            generators.append(self._wait_one_response(tmp_obj, request))
+                            rids.append(tmp_obj.rid)
+            else:
+                # FIXME: When using batch and parallel_sample_num together, the perf is not optimal.
+                if batch_size > 128:
+                    logger.warning(
+                        "Sending a single large batch with parallel sampling (n > 1) has not been well optimized. "
+                        "The performance might be better if you just duplicate the requests n times or use "
+                        "many threads to send them one by one with parallel sampling (n > 1)."
+                    )
+
+                # Tokenize all requests
+                objs = [obj[i] for i in range(batch_size)]
+                tokenized_objs = await asyncio.gather(
+                    *(self._tokenize_one_request(obj) for obj in objs)
                 )
 
-            # Tokenize all requests
-            objs = [obj[i] for i in range(batch_size)]
-            tokenized_objs = await asyncio.gather(
-                *(self._tokenize_one_request(obj) for obj in objs)
-            )
-
-            # Cache the common prefix for parallel sampling
-            for i in range(batch_size):
-                tmp_obj = copy.copy(objs[i])
-                tokenized_obj = copy.copy(tokenized_objs[i])
-                # Ensure independent mm_items so wrap_shm_features won't mutate the original
-                if hasattr(tokenized_obj, "mm_inputs") and tokenized_obj.mm_inputs:
-                    tokenized_obj.mm_inputs = copy.copy(tokenized_obj.mm_inputs)
-                    tokenized_obj.mm_inputs.mm_items = [
-                        copy.copy(item) for item in tokenized_obj.mm_inputs.mm_items
-                    ]
-                tokenized_obj.rid = tmp_obj.regenerate_rid()
-                tokenized_obj.sampling_params = copy.copy(tokenized_obj.sampling_params)
-                tokenized_obj.sampling_params.max_new_tokens = 0
-                tokenized_obj.stream = False
-                self._init_req_state(tmp_obj)
-                self._send_one_request(tokenized_obj)
-                await self._wait_one_response(tmp_obj, request).__anext__()
-
-            # Expand requests, assign new rids for them, and send them
-            for i in range(batch_size):
-                for _ in range(obj.parallel_sample_num):
+                # Cache the common prefix for parallel sampling
+                for i in range(batch_size):
                     tmp_obj = copy.copy(objs[i])
                     tokenized_obj = copy.copy(tokenized_objs[i])
                     # Ensure independent mm_items so wrap_shm_features won't mutate the original
@@ -1896,26 +1901,62 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                             copy.copy(item) for item in tokenized_obj.mm_inputs.mm_items
                         ]
                     tokenized_obj.rid = tmp_obj.regenerate_rid()
+                    tokenized_obj.sampling_params = copy.copy(
+                        tokenized_obj.sampling_params
+                    )
+                    tokenized_obj.sampling_params.max_new_tokens = 0
+                    tokenized_obj.stream = False
                     self._init_req_state(tmp_obj)
-                    state = self.rid_to_state[tmp_obj.rid]
-                    tokenized_obj.time_stats = state.time_stats
-                    if tmp_obj.return_prompt_token_ids:
-                        state.prompt_token_ids = list(tokenized_objs[i].input_ids)
+                    spawned_states[tmp_obj.rid] = self.rid_to_state[tmp_obj.rid]
                     self._send_one_request(tokenized_obj)
-                    generators.append(self._wait_one_response(tmp_obj, request))
-                    rids.append(tmp_obj.rid)
+                    await self._wait_one_response(tmp_obj, request).__anext__()
 
-                self.rid_to_state[objs[i].rid].time_stats.set_finished_time()
-                del self.rid_to_state[objs[i].rid]
+                # Expand requests, assign new rids for them, and send them
+                for i in range(batch_size):
+                    for _ in range(obj.parallel_sample_num):
+                        tmp_obj = copy.copy(objs[i])
+                        tokenized_obj = copy.copy(tokenized_objs[i])
+                        # Ensure independent mm_items so wrap_shm_features won't mutate the original
+                        if (
+                            hasattr(tokenized_obj, "mm_inputs")
+                            and tokenized_obj.mm_inputs
+                        ):
+                            tokenized_obj.mm_inputs = copy.copy(tokenized_obj.mm_inputs)
+                            tokenized_obj.mm_inputs.mm_items = [
+                                copy.copy(item)
+                                for item in tokenized_obj.mm_inputs.mm_items
+                            ]
+                        tokenized_obj.rid = tmp_obj.regenerate_rid()
+                        self._init_req_state(tmp_obj)
+                        spawned_states[tmp_obj.rid] = self.rid_to_state[tmp_obj.rid]
+                        state = self.rid_to_state[tmp_obj.rid]
+                        tokenized_obj.time_stats = state.time_stats
+                        if tmp_obj.return_prompt_token_ids:
+                            state.prompt_token_ids = list(tokenized_objs[i].input_ids)
+                        self._send_one_request(tokenized_obj)
+                        generators.append(self._wait_one_response(tmp_obj, request))
+                        rids.append(tmp_obj.rid)
 
-        # Wait for all requests
-        is_stream = hasattr(obj, "stream") and obj.stream
-        if not is_stream:
-            outputs = await self._collect_batch_responses(generators)
-            yield outputs
-        else:
-            async for response in self._stream_batch_responses(generators, rids):
-                yield response
+                    self.rid_to_state[objs[i].rid].time_stats.set_finished_time()
+                    del self.rid_to_state[objs[i].rid]
+
+            # Wait for all requests
+            is_stream = hasattr(obj, "stream") and obj.stream
+            if not is_stream:
+                outputs = await self._collect_batch_responses(generators)
+                yield outputs
+            else:
+                async with aclosing(
+                    self._stream_batch_responses(generators, rids)
+                ) as responses:
+                    async for response in responses:
+                        yield response
+
+        except BaseException:
+            self._cancel_or_discard_req_states(
+                spawned_states, expected_states=spawned_states
+            )
+            raise
 
     async def _collect_batch_responses(self, generators):
         tasks = [asyncio.create_task(gen.__anext__()) for gen in generators]
@@ -1972,8 +2013,14 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             and rid not in self.rid_to_state
         ):
             return
+        state = None if abort_all else self.rid_to_state.get(rid)
+        if state is not None and state.abort_requested:
+            return
         req = AbortReq(rid=rid, abort_all=abort_all)
         self._dispatch_to_scheduler(req)
+        if state is not None:
+            state.abort_requested = True
+        logger.info("GLM53 cancel-v1: dispatched scheduler abort for rid=%s", rid)
         if self.enable_metrics:
             # TODO: also use custom_labels from the request
             self.metrics_collector.observe_one_aborted_request(
@@ -2467,6 +2514,10 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                         )
                     )
 
+                if state.abort_requested:
+                    logger.info(
+                        "GLM53 cancel-v1: terminal output for cancelled rid=%s", rid
+                    )
                 del self.rid_to_state[rid]
 
                 # Mark ongoing LoRA request as finished.
@@ -3239,6 +3290,10 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             "output_ids": output_ids,
             "meta_info": meta_info,
         }
+        if state.abort_requested:
+            logger.info(
+                "GLM53 cancel-v1: scheduler abort echo for rid=%s", recv_obj.rid
+            )
         del self.rid_to_state[recv_obj.rid]
 
         state.out_list.append(out)
@@ -3440,19 +3495,38 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 time_stats.init_trace_ctx(rid, bootstrap_room, external_trace_header)
             time_stats.set_created_time(created_time)
 
-    def _discard_pending_req_states(self, obj):
-        """Drop rid_to_state entries created by _init_req_state for *obj*.
-
-        Safe to call after a partial/failed dispatch: only entries still present
-        are removed, and the scheduler-response path looks up state with
-        ``.get(...)`` so a later output for a discarded rid is ignored, not fatal.
-        """
+    def _discard_pending_req_states(self, obj, *, expected_states=None):
+        """Cancel dispatched work; discard only requests that never left this process."""
         if not hasattr(obj, "is_single") or obj.is_single:
             rids = [obj.rid]
         else:
             rids = obj.rid
+        self._cancel_or_discard_req_states(rids, expected_states=expected_states)
+
+    def _cancel_or_discard_req_states(self, rids, *, expected_states=None):
         for rid in rids:
-            self.rid_to_state.pop(rid, None)
+            state = self.rid_to_state.get(rid)
+            if state is None:
+                continue
+            if expected_states is not None and expected_states.get(rid) is not state:
+                # A completed RID may have been reused while the old SSE writer
+                # was suspended. Its cleanup must not cancel the new request.
+                continue
+            if not state.dispatched_to_scheduler:
+                self.rid_to_state.pop(rid, None)
+                continue
+            if state.finished or state.abort_requested:
+                continue
+            # Do not delete live state: abort_request needs it and an in-flight
+            # output can arrive before the scheduler acknowledges the abort.
+            try:
+                self.abort_request(rid)
+            except Exception:
+                # Preserve state so a later abort can retry. Keep
+                # attempting other batch members and preserve the original error.
+                logger.exception(
+                    "GLM53 cancel-v1: failed to dispatch abort for rid=%s", rid
+                )
 
     def _should_dispatch_to_encoder(
         self, obj: Union[GenerateReqInput, EmbeddingReqInput]

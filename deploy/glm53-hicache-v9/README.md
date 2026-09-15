@@ -1,16 +1,19 @@
-Current candidate: **v9.13, based on v9.12** (`3e2b2c5c5176fbf665631b6a1f4961b337707965`).
-See [v9.13 audit, evidence, build and short validation](benchmarks/V9.13-AUDIT.md).
-The Docker base is the existing v9.12 image, with an exact-hash v9.10 fallback.
-The build installs the Python overlay and checks it; it adds no nvcc/CUTLASS
-compilation, dependency upgrade or model download. Humming remains opt-in,
-and stock CUTLASS stays available. GPU validation is outstanding.
+Current candidate: **v9.14, based on v9.13** (`ca6f232142316e660c2defc3b1ee2b4ddc197818`).
+See [v9.14 cancellation fix, build and verification](benchmarks/V9.14-CANCEL.md).
 
-Use manifests 05–10: CP8/DCP4 with speculation off, DFlash2 (block 8), bounded
-profiling, native EAGLE on TP8, and optional DFlash2 block 4. The DFlash defaults
-warn on an eager fallback. All these comparison manifests include decode bucket 40.
+This releases the prepared `GLM53_CANCEL_V1` hotfix through the existing build
+kit, with explicit closure of chat SSE and nested batch generators. The default
+base is the verified running v9.13 image pinned by digest. The Docker build runs
+cancellation regressions on the installed files without importing the model or
+running GPU kernels.
 
-**The remaining sections are historical. Use the v9.13 document for current
-build and run commands.**
+For the current KServe/Knative model, change only its image through the owning
+platform resource and retain its existing arguments. Manifests 05–10 are the
+historical direct-Deployment comparison profiles, with only the image tag
+updated here; they are not the current production model's configuration.
+
+**The remaining sections are historical. Use the v9.14 document for current
+build and validation commands.**
 
 # GLM-5.3: DFlash2 + CP8/DCP4 + GPU/RAM HiCache
 
