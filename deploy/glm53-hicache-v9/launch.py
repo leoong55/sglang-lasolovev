@@ -24,8 +24,8 @@ def configure(argv):
     return list(argv)
 
 
-def check_profile(argv):
-    validate(argv)
+def check_profile(argv, *, target_quantization="w4afp8"):
+    validate(argv, target_quantization=target_quantization)
     p = argparse.ArgumentParser(allow_abbrev=False)
     p.add_argument("--glm53-profile", choices=["cp8-dcp4", "tp8"], default="cp8-dcp4")
     p.add_argument("--model-path")
@@ -34,10 +34,10 @@ def check_profile(argv):
     p.add_argument("--cuda-graph-backend-decode", required=True, choices=["full", "disabled"])
     p.add_argument("--cuda-graph-max-bs-decode", type=int)
     p.add_argument("--cuda-graph-bs-decode", nargs="+", type=int)
-    p.add_argument("--disable-shared-experts-fusion", action="store_true", required=True)
+    p.add_argument("--disable-shared-experts-fusion", action="store_true", required=target_quantization == "w4afp8")
     p.add_argument("--dsa-prefill-backend", required=True)
     p.add_argument("--moe-a2a-backend", required=True)
-    p.add_argument("--moe-runner-backend", choices=["auto", "cutlass", "humming"], default="auto")
+    p.add_argument("--moe-runner-backend", choices=["auto", "triton"] if target_quantization == "fp8" else ["auto", "cutlass", "humming"], default="auto")
     p.add_argument("--cuda-graph-backend-prefill", required=True, choices=["breakable", "disabled"])
     p.add_argument("--cuda-graph-bs-prefill", nargs="+", type=int)
     p.add_argument("--cuda-graph-max-bs-prefill", type=int)
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     configure_runtime_env(profile)
     argv = runtime_argv(argv)
     print(f"glm53: profile={profile.glm53_profile}; speculation={profile.speculative_algorithm or 'off'}; "
-          f"moe-backend={'cutlass' if profile.moe_runner_backend == 'auto' else profile.moe_runner_backend}; "
+          f"moe-backend-requested={profile.moe_runner_backend}; "
           f"cp-decode-fusion={profile.glm53_cp_decode_fusion}; "
           f"hicache={profile.enable_hierarchical_cache}; max-running={profile.max_running_requests}; "
           f"bounded-draft-window={profile.glm53_draft_cache_window}; "
