@@ -71,6 +71,11 @@ class _CacheHitRateWindow:
         return self.hit_tokens / self.total_tokens if self.total_tokens > 0 else 0.0
 
 
+def _pp_active_request_count(scheduler: Scheduler) -> int:
+    """Count live requests across local PP slots, not across pipeline ranks."""
+    return sum(not req.finished() for req in scheduler.collect_inflight_reqs())
+
+
 def _decode_total_seq_lens(batch: ScheduleBatch) -> int:
     """Sync-free sum of seq_lens for decode metrics."""
     if batch.seq_lens_cpu is not None:
@@ -816,6 +821,8 @@ class SchedulerMetricsReporter:
         )
         iter_msg = f" [{batch_iter}]" if LOG_FORWARD_ITERS else ""
         msg = f"Decode batch{iter_msg}, #running-req: {num_running_reqs}, {token_usage_msg}"
+        if self.scheduler.ps.pp_size > 1:
+            msg += f"#pp-active-req: {_pp_active_request_count(self.scheduler)}, "
 
         spec_num_steps = 0
         spec_num_draft_tokens = 0

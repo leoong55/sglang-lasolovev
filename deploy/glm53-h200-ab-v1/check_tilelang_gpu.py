@@ -5,6 +5,7 @@ It fails rather than skipping when no Hopper GPU is available.
 """
 
 import json
+from types import SimpleNamespace
 
 import torch
 
@@ -46,6 +47,20 @@ def main():
             raw[1:].float(), kv_source[1:].to(raw.dtype).float(), rtol=0, atol=0
         )
         assert torch.count_nonzero(raw[0].float()) == 0
+        if tail:
+            # Prefix read on PP stage 1: global layer 39 maps to local slot 0.
+            # Preserve page order and duplicate positions, as in a shared prefix.
+            pool.start_layer = 39
+            pool.layer_transfer_counter = None
+            pool.store_dtype = torch.uint8
+            pool.kv_buffer = [raw.view(torch.uint8)]
+            prefix_ids = torch.tensor([65, 2, 65, 127], device="cuda")
+            nope, rope = pool.get_mla_kv_buffer(
+                SimpleNamespace(layer_id=39), prefix_ids, torch.bfloat16
+            )
+            expected = raw.float()[prefix_ids].bfloat16()
+            torch.testing.assert_close(nope, expected[:, :, :512], rtol=0, atol=0)
+            torch.testing.assert_close(rope, expected[:, :, 512:], rtol=0, atol=0)
         indices = torch.randint(
             1, 4096, (seq, 1, 2048), device="cuda", dtype=torch.int32
         )
