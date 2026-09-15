@@ -22,6 +22,7 @@ jobs:
           python3 -m isort deploy/glm53-fp8-cp8-dcp4-v1
           python3 -m black deploy/glm53-fp8-cp8-dcp4-v1
           git diff --exit-code -- deploy/glm53-fp8-cp8-dcp4-v1
+          test -x deploy/glm53-fp8-cp8-dcp4-v1/build.sh
   image:
     needs: format
     runs-on: ubuntu-latest

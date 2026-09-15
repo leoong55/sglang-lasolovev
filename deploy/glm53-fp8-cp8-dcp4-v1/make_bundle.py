@@ -41,6 +41,7 @@ def main():
         moe_backend_default="auto (native FP8 with A2A none: Triton)",
         moe_backend_opt_in=None,
         humming_required=False,
+        humming_ep_aware_default=False,
         shared_experts_fusion="native default",
         speculative_profiles={"cp8-dcp4": ["off", "DFLASH"]},
         default_build_base="lmsysorg/sglang:v0.5.19-cu130@sha256:d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9",
