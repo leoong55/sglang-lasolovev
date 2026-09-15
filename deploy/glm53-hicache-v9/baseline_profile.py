@@ -9,7 +9,9 @@ from pathlib import Path
 from install import install, package_root
 
 
-def validate(argv):
+def validate(argv, *, target_quantization="w4afp8"):
+    if target_quantization not in ("w4afp8", "fp8"):
+        raise ValueError("Unsupported GLM53 target quantization")
     p = argparse.ArgumentParser(allow_abbrev=False)
     p.add_argument("--glm53-profile", choices=["cp8-dcp4", "tp8"], default="cp8-dcp4")
     for flag in (
@@ -21,11 +23,11 @@ def validate(argv):
         "dcp-comm-backend",
         "kv-cache-dtype",
         "page-size",
-        "quantization",
         "dsa-prefill-backend",
         "dsa-decode-backend",
     ):
         p.add_argument("--" + flag, required=True)
+    p.add_argument("--quantization", required=target_quantization == "w4afp8")
     p.add_argument("--cp-strategy")
     p.add_argument("--enable-prefill-cp", action="store_true")
     p.add_argument("--enable-cp-decode-attn-tp", action="store_true")
@@ -38,7 +40,6 @@ def validate(argv):
         dcp_comm_backend="ag_rs",
         kv_cache_dtype="fp8_e4m3",
         page_size="64",
-        quantization="w4afp8",
         dsa_decode_backend="flashmla_kv",
     )
     if args.glm53_profile == "cp8-dcp4":
@@ -57,6 +58,18 @@ def validate(argv):
             p.error("This profile supports L1/L2 HiCache only")
     config_path = Path(args.model_path) / "config.json"
     config = json.loads(config_path.read_text())
+    if target_quantization == "fp8":
+        quant = config.get("quantization_config") or {}
+        if (
+            args.quantization not in (None, "fp8")
+            or quant.get("quant_method") != "fp8"
+            or quant.get("weight_block_size") != [128, 128]
+            or quant.get("activation_scheme") != "dynamic"
+            or config.get("architectures") != ["GlmMoeDsaForCausalLM"]
+        ):
+            p.error("FP8 profile requires the full GLM53 serialized FP8 checkpoint, dynamic activations and 128x128 weight blocks; omit --quantization or use fp8")
+    elif args.quantization != "w4afp8":
+        p.error("W4 profile requires --quantization w4afp8")
     expected_shape = dict(num_hidden_layers=78, kv_lora_rank=512, qk_rope_head_dim=64)
     for key, value in expected_shape.items():
         if config.get(key) != value:

@@ -1,0 +1,109 @@
+name: GLM53 FP8 CP8 DCP4 image
+on:
+  push:
+    branches: [work/glm53-fp8-cp8-dcp4-v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: glm53-fp8-cp8-dcp4-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Check formatting of the new kit
+        run: |
+          python3 -m pip install black==26.1.0 isort==7.0.0
+          python3 -m isort deploy/glm53-fp8-cp8-dcp4-v1
+          python3 -m black deploy/glm53-fp8-cp8-dcp4-v1
+          git diff --exit-code -- deploy/glm53-fp8-cp8-dcp4-v1
+  image:
+    needs: format
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Check FP8 profile and native defaults
+        run: |
+          python3 -m pip install PyYAML
+          python3 -m unittest discover -s deploy/glm53-fp8-cp8-dcp4-v1/tests -v
+          python3 -m unittest discover -s deploy/glm53-hicache-v9/tests -p 'test_host_spec_profiles.py' -v
+          SGLANG_SOURCE_ROOT="$GITHUB_WORKSPACE" python3 -m unittest discover -s deploy/glm53-hicache-v9/tests -p 'test_chunk_resolved_profile.py' -v
+          bash -n deploy/glm53-fp8-cp8-dcp4-v1/build.sh
+      - name: Fetch exact cumulative history and prepare source kit
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            0bcd822377da7b5718e674eaf9c870d349424dd1 \
+            6526bef6bf959e203a0cc23dacdb2553f81c1e3e \
+            1f1171df23c98755c7d479d8befe071a9e13ecbe \
+            3e2b2c5c5176fbf665631b6a1f4961b337707965 \
+            ca6f232142316e660c2defc3b1ee2b4ddc197818 \
+            219206f7db9f7ffb24dad2605edf72af62d4939e
+          python3 deploy/glm53-fp8-cp8-dcp4-v1/make_bundle.py "$RUNNER_TEMP/glm53-fp8-cp8-dcp4-v1"
+          cd "$RUNNER_TEMP/glm53-fp8-cp8-dcp4-v1"
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glm53-fp8-cp8-dcp4-source-${{ github.sha }}
+          path: ${{ runner.temp }}/glm53-fp8-cp8-dcp4-v1.tar.gz
+          if-no-files-found: error
+      - name: Make room for CUDA image
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve immutable source tag
+        id: meta
+        run: |
+          commit=$(git rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:glm53-fp8-cp8-dcp4-v1-${commit:0:12}" >> "$GITHUB_OUTPUT"
+      - name: Build, verify installed runtime and publish candidate
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ runner.temp }}/glm53-fp8-cp8-dcp4-v1
+          file: ${{ runner.temp }}/glm53-fp8-cp8-dcp4-v1/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            SOURCE_COMMIT=${{ steps.meta.outputs.commit }}
+          provenance: mode=max
+      - name: Record digest and render FP8 manifest
+        env:
+          FP8_IMAGE: ${{ steps.meta.outputs.image }}
+          FP8_DIGEST: ${{ steps.build.outputs.digest }}
+          FP8_COMMIT: ${{ steps.meta.outputs.commit }}
+        run: |
+          mkdir image-artifacts
+          python3 deploy/glm53-fp8-cp8-dcp4-v1/render.py --image "$FP8_IMAGE@$FP8_DIGEST" > image-artifacts/fp8-cp8-dcp4-c40.yaml
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          data={k:os.environ['FP8_'+k.upper()] for k in ('image','digest','commit')}
+          data['gpu_validated']=False
+          Path('image-artifacts/image.json').write_text(json.dumps(data,indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write(f"Candidate: `{data['image']}@{data['digest']}`\n\nH200 execution and performance have not been validated.\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glm53-fp8-cp8-dcp4-image-${{ github.sha }}
+          path: image-artifacts/
+          if-no-files-found: error

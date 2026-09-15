@@ -11,13 +11,18 @@ def supports_cp_dcp(server_args):
     cfg = resolving_view(server_args)
     resolved = resolved_view(server_args)
     model = model_config_of(server_args).hf_config
+    weights_supported = cfg.quantization == "w4afp8"
+    if not weights_supported:
+        from sglang.srt.layers.cp.glm53_fp8 import supports_fp8_target
+
+        weights_supported = supports_fp8_target(cfg, resolved, model)
     return (
         cfg.tp_size == 8 and cfg.ep_size == 8 and cfg.dp_size == 1 and cfg.pp_size == 1
         and cfg.enable_prefill_cp and cfg.cp_strategy == "interleave"
         and cfg.enable_cp_decode_attn_tp and cfg.dcp_size == 4
         and cfg.dcp_comm_backend == "ag_rs"
         and cfg.kv_cache_dtype == "fp8_e4m3" and cfg.page_size == 64
-        and cfg.quantization == "w4afp8"
+        and weights_supported
         and resolved.attn_cp_size == 8 and resolved.moe_a2a_backend == "none"
         # Generic dispatch selects DSA; its kernels have separate selectors.
         and attention_backends_of(resolved) == ("dsa", "dsa")
