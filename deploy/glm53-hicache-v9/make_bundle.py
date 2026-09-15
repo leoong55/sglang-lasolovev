@@ -15,6 +15,11 @@ V98 = "2aa3716d0e9f4d55dca0e5c31dbef2b8c55a3dcf"
 V99 = "6bd52126422de3671558f3e412bba0cd57188aa8"
 V910 = "1f1171df23c98755c7d479d8befe071a9e13ecbe"
 V912 = "3e2b2c5c5176fbf665631b6a1f4961b337707965"
+V913 = "ca6f232142316e660c2defc3b1ee2b4ddc197818"
+V913_IMAGE = (
+    "i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang"
+    "@sha256:cbe5d638e2c95cefb49a6c5cd3c562a247fae67f731b877f5a824fa604179155"
+)
 
 
 def main():
@@ -62,12 +67,23 @@ def main():
     )
     for path in paths:
         before = None if path in added else git("show", f"{BASE}:{path}")
+
         def source_hash(revision):
-            exists = subprocess.run(
-                ["git", "cat-file", "-e", f"{revision}:{path}"], cwd=repo,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            ).returncode == 0
-            return hashlib.sha256(git("show", f"{revision}:{path}")).hexdigest() if exists else None
+            exists = (
+                subprocess.run(
+                    ["git", "cat-file", "-e", f"{revision}:{path}"],
+                    cwd=repo,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                ).returncode
+                == 0
+            )
+            return (
+                hashlib.sha256(git("show", f"{revision}:{path}")).hexdigest()
+                if exists
+                else None
+            )
+
         after = (repo / path).read_bytes()
         target = output / "overlay" / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -75,17 +91,24 @@ def main():
         records.append(
             dict(
                 path=path,
-                base_sha256=hashlib.sha256(before).hexdigest()
-                if before is not None
-                else None,
+                base_sha256=(
+                    hashlib.sha256(before).hexdigest() if before is not None else None
+                ),
                 patched_sha256=hashlib.sha256(after).hexdigest(),
-                previous_sha256=source_hash(V912),
-                compatible_sha256=[source_hash(V910)],
+                previous_sha256=source_hash(V913),
+                compatible_sha256=[source_hash(V910), source_hash(V912)],
             )
         )
     (output / "runtime.patch").write_bytes(patch)
-    (output / "v9.12-to-v9.13.patch").write_bytes(
-        git("diff", "--binary", V912, "--", "python/sglang", str(source.relative_to(repo)))
+    (output / "v9.13-to-v9.14.patch").write_bytes(
+        git(
+            "diff",
+            "--binary",
+            V913,
+            "--",
+            "python/sglang",
+            str(source.relative_to(repo)),
+        )
     )
     (output / "v8-to-hicache.patch").write_bytes(
         git(
@@ -107,15 +130,24 @@ def main():
                 upstream_pr_head=PR_HEAD,
                 gpu_validated=False,
                 image_built_here=False,
-                profile="glm53-hicache-v9.13",
+                profile="glm53-hicache-v9.14",
                 moe_backend_default="cutlass",
                 moe_backend_opt_in="humming",
                 humming_version="0.1.12",
-                previous_working_commit=V912,
-                compatible_image_commits=[V910, V912],
+                previous_working_commit=V913,
+                compatible_image_commits=[V910, V912, V913],
                 cutlass_extension_included=False,
-                default_build_base="glm53-hicache-v9.12-0bcd822377da",
-                speculative_profiles={"cp8-dcp4": ["off", "DFLASH"], "tp8": ["off", "EAGLE"]},
+                default_build_base=V913_IMAGE,
+                cancellation_patch="GLM53_CANCEL_V1",
+                cancellation_explicit_generator_close=True,
+                verified_v913_sources={
+                    "srt/managers/tokenizer_manager.py": "bdfaa4f4f214515f2138a3a82e8215882735490dfa85c271d2c41830b682ad33",
+                    "srt/entrypoints/openai/serving_chat.py": "7b05e6ab1d09a71ce253040c9cd62ea7c55a52020b44cf9b76d91c8df9e23240",
+                },
+                speculative_profiles={
+                    "cp8-dcp4": ["off", "DFLASH"],
+                    "tp8": ["off", "EAGLE"],
+                },
                 bounded_dflash_block_sizes=[2, 4, 8],
                 dflash_block_size_default=8,
                 dflash_scheduler_metadata_fix=True,

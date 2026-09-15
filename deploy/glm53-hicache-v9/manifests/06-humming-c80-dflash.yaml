@@ -180,7 +180,7 @@ spec:
           value: '1'
         - name: SGLANG_GLM53_PREFILL_BCG_PADDING
           value: '1'
-        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.13-0bcd822377da
+        image: i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-hicache-v9.14-0bcd822377da
         imagePullPolicy: IfNotPresent
         name: sglang
         ports:
