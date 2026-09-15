@@ -2453,8 +2453,12 @@ def calculate_mla_kv_cache_dim(
     ):
         return kv_cache_dim
 
-    # On HIP, TileLang and AITER DSA kernels consume the raw MLA KV layout:
-    # nope(512 fp8) + rope(64 fp8), without extra per-block scales.
+    # CUDA TileLang FP8 and HIP raw-layout kernels store nope + rope directly.
+    if (
+        get_exec().kernel.dsa_prefill_backend == "tilelang"
+        and get_exec().kernel.dsa_decode_backend == "tilelang"
+    ):
+        return kv_cache_dim
     if _is_hip and (
         get_exec().kernel.dsa_prefill_backend in ("tilelang", "aiter")
         or get_exec().kernel.dsa_decode_backend in ("tilelang", "aiter")

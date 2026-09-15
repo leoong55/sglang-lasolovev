@@ -650,19 +650,17 @@ def _check_tilelang_dsa_fp8_kv(
     *,
     hip: bool,
 ) -> None:
-    """tilelang's fp8 KV path is ROCm-only; the CUDA kernel hardcodes bfloat16.
-    Reject here instead of crashing at decode CUDA-graph capture."""
+    """CUDA TileLang FP8 uses a raw KV layout shared by both attention phases."""
+
     if (
         not hip
         and kv_cache_dtype == "fp8_e4m3"
         and "tilelang" in {prefill_backend, decode_backend}
+        and (prefill_backend != "tilelang" or decode_backend != "tilelang")
     ):
         raise ValueError(
-            "The tilelang DSA prefill/decode kernels only support an fp8_e4m3 KV "
-            "cache on ROCm/HIP; on CUDA they require a bfloat16 KV cache. Use "
-            "--kv-cache-dtype bfloat16 with the tilelang backend, or keep "
-            "--kv-cache-dtype fp8_e4m3 and pick an fp8-capable DSA backend "
-            "(flashmla_kv on Hopper, trtllm on Blackwell)."
+            "CUDA TileLang FP8 KV requires tilelang for both DSA prefill and decode "
+            "because both phases must consume the same raw KV layout."
         )
 
 
