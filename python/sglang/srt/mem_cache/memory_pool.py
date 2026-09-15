@@ -4118,8 +4118,15 @@ class MLATokenToKVPool(KVCache):
         cache_k_nope: torch.Tensor,
         cache_k_rope: torch.Tensor,
     ) -> None:
-        if _is_hip and self.use_dsa and self.dtype == fp8_dtype:
-            # HIP FP8 path uses raw MLA KV layout (nope + rope) without per-block scales.
+        if (
+            self.use_dsa
+            and self.dtype == fp8_dtype
+            and (
+                _is_hip
+                or self.kv_cache_dim == self.kv_lora_rank + self.qk_rope_head_dim
+            )
+        ):
+            # The allocator selected raw nope + rope storage without block scales.
             # Fuse BF16/FP16 -> FP8 cast with paged KV write.
             set_mla_kv_buffer_triton_fp8_quant(
                 dst_buffer,

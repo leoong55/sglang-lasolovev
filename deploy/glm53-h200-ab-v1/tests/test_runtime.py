@@ -5,6 +5,7 @@ import enum
 import importlib.util
 import os
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -20,6 +21,7 @@ class Result(enum.Enum):
     CONTINUE = 0
     NO_TOKEN = 1
     OTHER = 2
+    SKIP = 3
 
 
 class ReachedShort(Exception):
@@ -49,8 +51,9 @@ def load_method(file, cls, method, globals_):
     return globals_[method]
 
 
-def flags(park=False, skip=False):
+def flags(park=False, skip=False, admit=False):
     return NS(
+        SGLANG_ENABLE_H200_ADMIT_FULL_NEED=NS(get=lambda: admit),
         SGLANG_ENABLE_H200_PARK_CHUNKED_PREFILL=NS(get=lambda: park),
         SGLANG_ENABLE_H200_SKIP_NOT_FITTING=NS(get=lambda: skip),
     )
@@ -226,6 +229,152 @@ class QueueTests(unittest.TestCase):
 
     def test_other_rejection_is_not_bypassed(self):
         self.assertFalse(self.run_queue(enabled=True, result=Result.OTHER)[0])
+
+    def test_short_budget_rejection_can_scan_to_shorter_request(self):
+        self.assertTrue(self.run_queue(enabled=True, result=Result.SKIP)[0])
+
+
+class AdmissionTests(unittest.TestCase):
+    def adder(self, free=100000):
+        ns = {
+            "AddReqResult": Result,
+            "CLIP_MAX_NEW_TOKENS": 4096,
+            "IGNORE_EOS_RESERVE_TOKENS": 0,
+        }
+        obj = NS(
+            full_need_reqs=[],
+            can_run_list=[],
+            page_size=64,
+            short_bypass_limit=512,
+            rem_short_bypass=512,
+            dllm_config=None,
+            rem_chunk_tokens=0,
+            rem_input_tokens=4096,
+            token_to_kv_pool_allocator=NS(available_size=lambda: free),
+            tree_cache=NS(evictable_size=lambda: 0, disable=False),
+        )
+        for name in (
+            "full_need_fits",
+            "_short_bypass_fits",
+            "ceil_paged_tokens",
+            "_update_prefill_budget",
+            "budget_state",
+            "add_one_req",
+            "add_one_req_ignore_eos",
+        ):
+            method = load_method(
+                "srt/managers/schedule_policy.py", "PrefillAdder", name, ns
+            )
+            setattr(obj, name, method.__get__(obj))
+        return obj
+
+    def req(self, prompt=1024, output=512, allocated=0, prefix=0, finished=False):
+        req = NS(
+            origin_input_ids=list(range(prompt)),
+            output_ids=[],
+            full_untruncated_fill_ids=list(range(prompt)),
+            prefix_indices=list(range(prefix)),
+            kv=NS(kv_allocated_len=allocated, cache_protected_len=0),
+            sampling_params=NS(max_new_tokens=output, ignore_eos=False),
+            finished=lambda: finished,
+            host_hit_length=0,
+            storage_hit_length=0,
+            last_node=None,
+            retracted_stain=False,
+            needs_host_load_back=lambda: False,
+        )
+        req.set_extend_range = lambda start, end: setattr(
+            req, "extend_range", NS(length=end - start)
+        )
+        return req
+
+    def test_all_microbatches_and_pending_extend_are_reserved_once(self):
+        a = self.adder(free=1407)
+        r1 = self.req(allocated=1024)  # 512 + page
+        r2 = self.req(allocated=1280)  # 256 + page
+        candidate = self.req(prompt=256, output=192)  # 448 + page
+        a.full_need_reqs = [r1, r2, r1]
+        a.can_run_list = [r2]
+        self.assertFalse(a.full_need_fits(candidate))
+        a.token_to_kv_pool_allocator.available_size = lambda: 1408
+        self.assertTrue(a.full_need_fits(candidate))  # 576 + 320 + 512
+
+    def test_incomplete_prefill_is_reserved(self):
+        a = self.adder(free=1600)
+        a.full_need_reqs = [self.req(prompt=2048, output=512, allocated=512)]
+        self.assertFalse(a.full_need_fits(self.req(prompt=64, output=64)))
+
+    def test_finished_request_does_not_hold_future_debt(self):
+        a = self.adder(free=192)
+        a.full_need_reqs = [self.req(prompt=9999, finished=True)]
+        self.assertTrue(a.full_need_fits(self.req(prompt=64, output=64)))
+
+    def test_locked_prefix_and_allocated_kv_are_not_double_charged(self):
+        a = self.adder(free=256)
+        self.assertTrue(
+            a.full_need_fits(self.req(prompt=1024, output=192, prefix=1024))
+        )
+
+    def test_page_slack_and_unallocated_pending_requests_are_charged(self):
+        a = self.adder(free=255)
+        r = self.req(prompt=64, output=1)
+        a.can_run_list = [r]
+        self.assertFalse(a.full_need_fits(self.req(prompt=1, output=1)))
+
+    def test_short_bypass_does_not_repeat_the_full_allowance(self):
+        a = self.adder()
+        a.rem_chunk_tokens = -448
+        a.rem_short_bypass = 64
+        self.assertFalse(a._short_bypass_fits(512))
+        self.assertTrue(a._short_bypass_fits(64))
+        self.assertFalse(a._short_bypass_fits(65))
+
+    def configure_admission(self, a):
+        a.rem_total_tokens = a.cur_rem_tokens = 100000
+        a.rem_total_token_offset = a.cur_rem_token_offset = 0
+        a.is_hybrid_swa = a.is_hybrid_ssm_cache = False
+        a.rem_mamba_slots = None
+        a.dsa_prefill_cp_in_seq_split = False
+        a.prefill_max_requests = None
+        a.prefill_delayer_single_pass = None
+        a.req_states = None
+        a.running_batch = None
+        a.new_token_ratio = 1
+        a._mamba_gap_budget_for_req = lambda r: 0
+        a._check_prefill_tile_budget = lambda n: None
+        a._lock_node = lambda n: nullcontext()
+        a._req_inc_lock_ref = lambda r: None
+        for name in (
+            "log_hit_tokens",
+            "log_input_tokens",
+            "reprocessed_log_hit_tokens",
+            "reprocessed_log_input_tokens",
+            "log_device_hit_tokens",
+            "log_host_hit_tokens",
+            "log_storage_hit_tokens",
+        ):
+            setattr(a, name, 0)
+
+    def test_two_admission_paths_share_a_bounded_extra_budget(self):
+        for ignore_eos in (False, True):
+            with self.subTest(ignore_eos=ignore_eos):
+                a = self.adder()
+                self.configure_admission(a)
+                a.tree_cache.disable = ignore_eos
+                for n in (448, 512, 64):
+                    r = self.req(prompt=n, output=128)
+                    r.sampling_params.ignore_eos = ignore_eos
+                    result = a.add_one_req(
+                        r, has_chunked_req=True, truncation_align_size=None
+                    )
+                    if n == 512:
+                        self.assertEqual(result, Result.SKIP)
+                        self.assertNotIn(r, a.can_run_list)
+                self.assertEqual(
+                    sum(r.extend_range.length for r in a.can_run_list), 512
+                )
+                self.assertEqual(a.rem_short_bypass, 0)
+                self.assertEqual(a.budget_state(), Result.OTHER)
 
 
 if __name__ == "__main__":

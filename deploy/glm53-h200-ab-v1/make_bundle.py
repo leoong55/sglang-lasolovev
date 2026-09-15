@@ -38,7 +38,10 @@ def main():
         image_built_here=False,
         gpu_validated=False,
         archive_patches=[
+            "3-fp8-tilelang-cuda-device-aware",
+            "4-admit-full-need-deduplicated-paged",
             "5-park-chunked-prefill-adapted",
+            "6-short-bypass-bounded",
             "7-skip-not-fitting-corrected",
         ],
         scheduler_patches_default=False,

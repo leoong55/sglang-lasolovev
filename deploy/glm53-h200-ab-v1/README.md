@@ -1,97 +1,79 @@
-# GLM53 H200 A/B — отдельный форк v9.14
+# H200: независимый эксперимент TP против TP+PP
 
-Этот комплект сохраняет все изменения v9.14 и добавляет две независимые экспериментальные опции из H200.zip: парковку chunked prefill и исправленный пропуск невлезающей головы очереди. Обе выключены по умолчанию. Остальные архивные правки отклонены по результатам [аудита каждого патча](AUDIT.md).
+Цель — измерить decode при большом числе одновременно активных пользователей на восьми H200. Предыдущая конфигурация исключена из эксперимента: CP/DCP не включаются ни в одном плече. Код образа остаётся форком нашей ветки, как было запрошено; её профиль запуска не используется.
 
-Это candidate для восьми H200, а не подтверждённый ускоренный production image. GPU inference и измерения не выполнялись при подготовке. Ветка `work/glm53-h200-ab-v1` отделена от текущего выпуска.
-
-## Образ и сборка
-
-Workflow `GLM53 H200 archive audit image` выпускает:
-
-- `ghcr.io/leoong55/sglang-lasolovev:glm53-h200-ab-v1-<12 символов commit>`;
-- artifact `glm53-h200-ab-image-<commit>` с `image.json` (digest) и тремя YAML;
-- checksummed source bundle `glm53-h200-ab-source-<commit>` для сборки в Harbor.
-
-Image base закреплён на публичном SGLang v0.5.19 CUDA13 digest. Кумулятивный overlay восстанавливает всю нашу ветку, включая Humming и v9.14 cancellation. Сборка не скачивает веса и не пересобирает CUDA kernels. Docker RUN проверяет SHA исходников, Humming dependency, cancellation/ASGI, native parser профилей и scheduler logic. Совпадение кода не подменяет GPU-проверку.
-
-Для Harbor распаковать source artifact и выполнить из каталога комплекта:
-
-```bash
-bash build.sh --push
-```
-
-Тег будет `i501-harbor-infra.ai.turbocloud.ru/images/lmsysorg/sglang:glm53-h200-ab-v1-<commit>`. Существующие теги не перезаписываются. `IMAGE` позволяет задать другой registry/tag. `GLM53_BASE_IMAGE` допускает совместимый закреплённый base; installer всё равно проверяет реальные файлы.
+Оба плеча используют один image digest, одинаковые веса, TileLang для prefill и decode, raw FP8 KV и одинаковые scheduler-патчи. Вывод о преимуществе или недостатке PP делается после измерения. Нельзя менять backend или формат весов вместе с топологией и приписывать всю разницу PP.
 
 ## Профили
 
-| Профиль | Топология | Назначение |
+| Профиль | TP × PP | EP на стадии | Назначение |
+|---|---|---|---|
+| `tp8-decode` | 8 × 1 | 8 | Контроль без PP |
+| `pp2-decode` | 4 × 2 | 4 | Промежуточная глубина PP; слои 39/39 |
+| `pp4-decode` | 2 × 4 | 2 | Архивная раскладка слоёв 21/20/20/17 |
+| `tp8-archive` | 8 × 1 | 8 | Контроль с mixed chunk и HiCache |
+| `pp4-archive` | 2 × 4 | 2 | Рецепт архива с mixed chunk и HiCache |
+
+Общие начальные значения: context500000, mem-fraction0.90, chunk4096, FP8 KV, TileLang, C80. Чистые decode-профили отключают HiCache, mixed chunk и speculation. Prefill graphs отключены, decode graphs включены. Локальный graph bucket покрывает microbatch: при C80 это 80/40/20 для PP1/2/4. PP штатно меняет работу CPU overlap scheduler; это часть реализации PP. Предложенные разбиения слоёв ещё не доказаны оптимальными.
+
+Архивные профили добавляют `hicache-size187`, `write_back`, `direct`, `layer_first`, mixed chunk. 187 GiB на ранг — почти 1.5 TiB на восемь рангов только для HiCache: при недостатке RAM явно уменьшить `--hicache-size` одинаково в обоих плечах. L3 не включён: архив требует реальное локальное хранилище. Максимальный контекст и доля памяти — настройки для проверки, не обещание вместимости. Допускается одинаково уменьшить `--context` / `--mem-fraction` после замера свободного пула.
+
+W4AFP8/Humming поддерживается по умолчанию; для официальных FP8 весов указать `--weights fp8 --model-pvc <реальное имя PVC>`. Они будут смонтированы в `/mnt/model-pvc-fp8`, квантование и MoE backend выбираются штатно по checkpoint. Внутри одной пары формат весов одинаковый.
+
+## Патчи
+
+[Подробный аудит](AUDIT.md) объясняет каждую правку. В этой ревизии перенесены идеи патчей 3–7, включая исправления 4/6. Патчи 1/2 относятся к отсутствующим реализациям Flash/mHC и KPool; у полного GLM проверяется его собственный PP-путь, а native DSA indexer уже содержит chunking logits.
+
+| Опция renderer | Переменная | Действие |
 |---|---|---|
-| `tp8-dcp4-decode` | TP8/EP8, CP8 interleave, DCP4, PP1 | Контроль нашей топологии без DFlash, HiCache и prefill graphs |
-| `pp4-decode` | TP2/EP2 × PP4, CP off, DCP1, partition21/20/20/17 | Второе плечо чистого serving decode |
-| `pp4-archive` | Та же PP4; mixed chunk, HiCache96/rank, write_back | Адаптированный рецепт архива для отдельной mixed-load проверки |
+| `--admit` | `SGLANG_ENABLE_H200_ADMIT_FULL_NEED=1` | Полная потребность по всем PP-микробатчам с дедупликацией и учётом страниц |
+| `--park` | `SGLANG_ENABLE_H200_PARK_CHUNKED_PREFILL=1` | Парковка незаконченного prefill при давлении на KV и наличии decode |
+| `--short-bypass 512` | `SGLANG_H200_SHORT_BYPASS_TOKENS=512` | Общий дополнительный бюджет коротких prefill на батч |
+| `--skip` | `SGLANG_ENABLE_H200_SKIP_NOT_FITTING=1` | Продолжение поиска после отказа конкретному запросу |
+| `--patches` | Все четыре выше | Общий режим для сравнения топологий |
 
-Общие значения: W4AFP8/Humming, FP8 KV, FlashMLA, mem0.80, chunk4096, C80, context131072, native decode CUDA graphs. В PP4 max microbatch20 и graph bucket20; в TP8 graph bucket80. Разный размер локального batch — следствие топологии. PP требует отключения CPU overlap scheduler, upstream делает это сам. DFlash/CP ограничения для PP не снимаются.
+Без опций scheduler-патчи выключены. `run-ab.sh` и YAML из image artifact включают все четыре в обоих плечах. FP8-патч выбирается флагами `--dsa-prefill-backend tilelang --dsa-decode-backend tilelang --kv-cache-dtype fp8_e4m3`. Он не зависит от scheduler-переменных. Переменные из оригинального архива не являются псевдонимами новых.
 
-Renderer создаёт отдельные Deployment и Service `sglang-glm53-h200-ab` в `inf-glm53`, на прежнем узле и существующих W4/compile-cache PVC. Плечи запускаются по очереди на одних восьми GPU. Нужно предварительно освободить этот узел от другого GPU-serving workload; скрипт управляет только lab Deployment. Сохранять исходный production YAML нужно в обычном процессе управления кластером.
+Эта адаптация scheduler предназначена для полного GLM с native MLA без speculation, disaggregation, SWA/Mamba, LoRA и priority preemption. Полное резервирование намеренно консервативно: ждёт заявленный max_new_tokens, учитывает незавершённый prefill, страницы и уже выделенный KV. Оно может уменьшать admission. Short-bypass и skip могут увеличивать ожидание крупных запросов; mixed-load замер должен учитывать оба класса.
+
+## Образ и проверка на H200
+
+Workflow `GLM53 H200 archive audit image` публикует отдельный immutable tag `ghcr.io/leoong55/sglang-lasolovev:glm53-h200-ab-v1-<commit>` и artifact с digest и YAML. Использовать новый digest из текущего workflow: предыдущий `d9e42fa3d4f0` не содержит этих дополнений.
+
+Базовый CUDA13 image закреплён digest. Установщик проверяет весь кумулятивный overlay и cancellation-тесты. CPU CI проверяет scheduler, профили, контроль сравнения и выбор CUDA TileLang dispatch. CPU проверки и сборка образа **не подтверждают компиляцию или точность ядра на H200**. TileLang компилирует ядра при запуске на GPU.
+
+Перед inference выполнить внутри нового образа на целевом GPU:
 
 ```bash
-python3 render.py --image "$IMAGE" --profile tp8-dcp4-decode > A.yaml
-python3 render.py --image "$IMAGE" --profile pp4-decode > B.yaml
-python3 render.py --image "$IMAGE" --profile pp4-archive --park --skip > archive.yaml
+python3 /opt/glm53-h200-ab/h200/check_tilelang_gpu.py
 ```
 
-`IMAGE` должен содержать digest из artifact. Новые флаги `--park` и `--skip` меняют только соответствующие переменные; full-need и short-bypass не включены. Старый validated launcher доступен через `--glm53-profile`: для возврата к прежнему профилю передаются его прежние аргументы. Новые native профили не проходят через CP8-only wrapper.
+Проверка выполняет настоящий raw KV writer, FP8 attention с разными числом голов/длиной запроса, tail64/0, маскированные indices и CUDA graph replay. Сравнение с FP32 reference использует те же квантованные входы: это тест ядра, не качества модели. Затем необходимы короткая генерация полного GLM, проверка качества относительно BF16/валидированного baseline и повторные complete/abort циклы с возвратом KV/слотов. Эти GPU проверки при подготовке не выполнялись.
 
-## Чистое A/B decode
+Для Harbor распаковать source artifact и запустить `bash build.sh --push`. Веса в образ не включаются. Отдельный Deployment/Service называется `sglang-glm53-h200-ab`, namespace `inf-glm53`. Выделить ему восемь GPU; управляющий скрипт работает только с этим Deployment. Compile cache хранится в отдельном pod-local каталоге и не зависит от старого compile-cache PVC.
 
-На машине с доступом к tokenizer PVC один раз создать токенизированную нагрузку. Требуются Python, aiohttp, PyYAML и transformers для `prepare`; для `run` tokenizer больше не нужен.
+## Запуск чистого decode A/B
 
 ```bash
+python3 render.py --image "$IMAGE" --profile tp8-decode --patches > A.yaml
+python3 render.py --image "$IMAGE" --profile pp4-decode --patches > B.yaml
+python3 render.py --image "$IMAGE" --profile pp4-archive --patches > archive.yaml
+
 python3 bench_decode.py prepare \
   --tokenizer /mnt/model-pvc-w4fp8 \
   --concurrency 80 --input-tokens 8192 --output-tokens 2048 \
   --seed 12345 --output decode-c80-8k.json
-```
 
-Запускать следующий скрипт с хоста/клиентского pod, где доступны kubectl, эти Python-зависимости и адрес Service. Он выполняет A1→B1→B2→A2, рестарт между плечами, прогрев такой же волной, idle cache flush, измеренную волну и сохранение logs/pod JSON. Текущий рабочий Deployment скрипт не останавливает. Не использовать lab Service для другого трафика во время теста.
-
-```bash
 IMAGE='ghcr.io/leoong55/sglang-lasolovev:glm53-h200-ab-v1-<commit>@sha256:<digest>' \
 DATASET="$PWD/decode-c80-8k.json" \
 RESULTS="$PWD/results-c80-8k" \
 bash run-ab.sh
 ```
 
-При доступе через другой адрес задать `URL`; он должен вести на lab Service и переживать смену pod. Итоги сравниваются `compare.py`, сырые cumulative token counters и timestamps остаются в `requests.json`. Подготовить такие же отдельные серии C40, C80, C120, C160; для каждой renderer задаёт тот же server cap. Затем повторить с input32k и75k. Невозможность одновременного resident decode при длинном контексте — результат проверки ёмкости: нельзя выдавать queued C80 за 80 одновременно декодируемых запросов.
+Для FP8 передать `WEIGHTS=fp8 MODEL_PVC=<имя>` и подготовить dataset его tokenizer. `PP_PROFILE=pp2-decode` выбирает промежуточный PP. `CONTEXT` и `MEM_FRACTION` одинаково меняют оба плеча. Адрес Service можно задать через `URL`.
 
-Главные показатели: output tok/s в общем decode-интервале, median per-request ms/token и хвосты stream gaps. TTFT печатается отдельно. Для каждого плеча сохранить pool sizes по rank, graph replay, GPU memory/utilization и значения retraction counters из логов. При errors/retraction/restart/коротком общем окне скрипт завершает тест с ошибкой. Интервал SSE не считается точным GPU ITL при coalescing.
+Порядок A1→B1→B2→A2. Между плечами pod перезапускается, затем идёт прогрев той же волной и idle cache flush. Сохраняются dataset hash, manifests, image digest, фактические pod/server args, raw token counters, timings и логи. `compare.py` разрешает только изменения топологии и производных размеров microbatch/graphs. Отдельные режимы `admit`, `short`, `park`, `skip` предназначены для изменения одной scheduler-опции.
 
-## Проверка планировщика
+Главная метрика — output tok/s в общем интервале, где все C запросов уже декодируют; отдельно median ms/token, TTFT и хвосты клиентских stream gaps. Ошибки, retraction, restart или отсутствие достаточно длинного общего decode-окна делают точку невалидной для resident decode. Это нужно отдельно записать как ограничение вместимости/стабильности, а не скрыть из отчёта. C80 в очереди не равняется C80 на GPU.
 
-В чистом resident decode патчи 5/7 обычно не имеют работы; ожидаемый результат — отсутствие ускорения. Их пользу измерять на отдельной mixed нагрузке:
-
-1. Одна и та же PP4-конфигурация и image, сначала обе опции0.
-2. Менять только `--park`, остальные параметры сохранять. Нужен наблюдаемый KV pressure и незавершённый chunk рядом с runnable decode.
-3. Отдельная пара с изменением только `--skip`: большая не помещающаяся голова + короткие запросы. Измерять TTFT **обоих** классов, максимальное ожидание большого запроса, retractions и total makespan.
-4. Только затем совместная проверка двух опций, включая cancellation, complete/abort и отсутствие утечки KV/слотов после опустошения очереди.
-
-Полная пара на `pp4-archive` — это mixed/cache benchmark. `bench_decode.py` намеренно отклоняет такой профиль; его результаты нельзя включить в чистую таблицу decode. Архивный `park-probe.py` требует исправления SSE accounting перед использованием как ITL-измерителя.
-
-## Отдельный FP8 вариант
-
-Официальные FP8 веса по `/mnt/model-pvc-fp8` поддерживаются renderer, но имя реального PVC нужно указать явно:
-
-```bash
-python3 render.py --image "$IMAGE" --profile pp4-archive \
-  --weights fp8 --model-pvc "$FP8_MODEL_PVC" --context 500000 > pp4-fp8.yaml
-```
-
-FP8 checkpoint выбирает свою quantization config и штатный backend; Humming W4 не навязывается. Context500000 требует соответствующего config модели и измеренного свободного пула. Не сравнивать этот вариант с W4 A и называть разницу эффектом PP или scheduler. Сначала провести TP8/DCP4↔PP4 на одинаковых FP8 весах отдельно. RAM/L3 session capacity не равна active decode concurrency.
-
-## Проверки
-
-```bash
-python3 -m unittest discover -s deploy/glm53-h200-ab-v1/tests -v
-```
-
-CPU tests проверяют реальные scheduler methods через AST с fake внешними зависимостями, renderer и расчёт общей decode-фазы. Docker отдельно парсит CLI установленной версии. Numerical parity, PP/H200 graph replay, устойчивость mixed-load и выигрыш скорости подтверждаются только реальным GPU запуском.
+Повторить C40/80/120/160, затем более длинные входы. В чистом decode scheduler-патчи могут почти не влиять: они обслуживают admission/prefill. Архивные mixed/cache профили замерять отдельно с длинным prefill и короткими arrivals; `bench_decode.py` их отклоняет. Для вывода «PP в целом хуже» одной раскладки и одного backend недостаточно; здесь проверяется конкретная реализация TP/PP на одинаковом TileLang-стеке.

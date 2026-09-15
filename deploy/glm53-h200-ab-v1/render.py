@@ -1,13 +1,12 @@
 """Render isolated H200 lab profiles; print YAML without deploying anything."""
 
 import argparse
-import copy
 import math
 from pathlib import Path
 
 import yaml
 
-PROFILES = ("tp8-dcp4-decode", "pp4-decode", "pp4-archive")
+PROFILES = ("tp8-decode", "pp2-decode", "pp4-decode", "tp8-archive", "pp4-archive")
 
 
 def render(
@@ -17,13 +16,23 @@ def render(
     concurrency=80,
     weights="w4afp8",
     model_pvc=None,
-    context=131072,
+    context=500000,
+    mem_fraction=0.90,
+    hicache_size=187,
+    patches=False,
+    admit=False,
+    short_bypass=0,
     park=False,
     skip=False,
     name="sglang-glm53-h200-ab"
 ):
     if profile not in PROFILES or concurrency < 1 or context < 4096:
         raise ValueError("Invalid profile/concurrency/context")
+    if not 0 < mem_fraction < 1 or short_bypass < 0 or hicache_size <= 0:
+        raise ValueError("Invalid memory fraction or scheduler budget")
+    if patches:
+        admit = park = skip = True
+        short_bypass = 512
     if weights == "fp8" and not model_pvc:
         raise ValueError("FP8 requires the actual --model-pvc name")
     obj = yaml.safe_load(
@@ -37,8 +46,8 @@ def render(
     spec = pod["spec"]
     c = spec["containers"][0]
     c["image"] = image
-    c["command"] = ["python3", "/opt/glm53-cp8-dcp4-v1/h200/launch.py"]
-    pp = 1 if profile == "tp8-dcp4-decode" else 4
+    c["command"] = ["python3", "/opt/glm53-h200-ab/h200/launch.py"]
+    pp = 1 if profile.startswith("tp8-") else (2 if profile.startswith("pp2-") else 4)
     tp = 8 // pp
     micro = math.ceil(concurrency / pp)
     buckets = sorted(
@@ -68,21 +77,19 @@ def render(
         str(tp),
         "--dp-size",
         "1",
-        "--dcp-size",
-        "4" if pp == 1 else "1",
         "--moe-a2a-backend",
         "none",
         "--kv-cache-dtype",
         "fp8_e4m3",
         "--dsa-prefill-backend",
-        "flashmla_sparse_q8",
+        "tilelang",
         "--dsa-decode-backend",
-        "flashmla_kv",
+        "tilelang",
         "--disable-shared-experts-fusion",
         "--page-size",
         "64",
         "--mem-fraction-static",
-        "0.80",
+        str(mem_fraction),
         "--context-length",
         str(context),
         "--max-running-requests",
@@ -114,22 +121,13 @@ def render(
     if weights == "w4afp8":
         args += ["--quantization", "w4afp8", "--moe-runner-backend", "humming"]
     # Official FP8 checkpoint carries its own quantization config; native backend selection.
-    if pp == 1:
-        args += [
-            "--enable-prefill-cp",
-            "--cp-strategy",
-            "interleave",
-            "--enable-cp-decode-attn-tp",
-            "--dcp-comm-backend",
-            "ag_rs",
-        ]
-    else:
+    if pp > 1:
         args += ["--pp-max-micro-batch-size", str(micro)]
-    if profile == "pp4-archive":
+    if profile.endswith("-archive"):
         args += [
             "--enable-hierarchical-cache",
             "--hicache-size",
-            "96",
+            str(hicache_size),
             "--hicache-write-policy",
             "write_back",
             "--hicache-io-backend",
@@ -140,17 +138,15 @@ def render(
         ]
     c["args"] = args
     env = {x["name"]: x["value"] for x in c["env"]}
-    for key in list(env):
-        if key.startswith("SGLANG_GLM53_") or key == "SGLANG_ENABLE_CP_V2":
-            env[key] = "0"
     env.update(
-        SGLANG_ENABLE_CP_V2="1" if pp == 1 else "0",
         SGLANG_GLM53_HUMMING_EP_AWARE="1",
+        SGLANG_ENABLE_H200_ADMIT_FULL_NEED="1" if admit else "0",
+        SGLANG_H200_SHORT_BYPASS_TOKENS=str(short_bypass),
         SGLANG_ENABLE_H200_PARK_CHUNKED_PREFILL="1" if park else "0",
         SGLANG_ENABLE_H200_SKIP_NOT_FITTING="1" if skip else "0",
     )
     if pp > 1:
-        env["SGLANG_PP_LAYER_PARTITION"] = "21,20,20,17"
+        env["SGLANG_PP_LAYER_PARTITION"] = "39,39" if pp == 2 else "21,20,20,17"
     c["env"] = [{"name": k, "value": v} for k, v in env.items()]
     for mount in c["volumeMounts"]:
         if mount["name"] == "model":
@@ -175,9 +171,16 @@ def main():
     p.add_argument("--image", required=True)
     p.add_argument("--profile", choices=PROFILES, required=True)
     p.add_argument("--concurrency", type=int, default=80)
-    p.add_argument("--context", type=int, default=131072)
+    p.add_argument("--context", type=int, default=500000)
     p.add_argument("--weights", choices=("w4afp8", "fp8"), default="w4afp8")
     p.add_argument("--model-pvc")
+    p.add_argument("--mem-fraction", type=float, default=0.90)
+    p.add_argument("--hicache-size", type=float, default=187)
+    p.add_argument(
+        "--patches", action="store_true", help="Enable all four scheduler patches"
+    )
+    p.add_argument("--admit", action="store_true")
+    p.add_argument("--short-bypass", type=int, default=0)
     p.add_argument("--park", action="store_true")
     p.add_argument("--skip", action="store_true")
     p.add_argument("--name", default="sglang-glm53-h200-ab")

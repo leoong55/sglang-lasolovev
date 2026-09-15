@@ -189,6 +189,8 @@ async def run(a):
             "enable_hierarchical_cache": False,
             "enable_mixed_chunk": False,
             "stream_interval": 1,
+            "dcp_size": 1,
+            "enable_prefill_cp": False,
         }
         for key, want in expected.items():
             if key not in server or server[key] != want:
@@ -199,9 +201,10 @@ async def run(a):
             "tp-size",
             "pp-size",
             "ep-size",
-            "dcp-size",
             "model-path",
             "kv-cache-dtype",
+            "dsa-prefill-backend",
+            "dsa-decode-backend",
         ):
             i = c["args"].index("--" + flag)
             want = c["args"][i + 1]

@@ -8,5 +8,5 @@ sha256sum -c SHA256SUMS
 args=(--build-arg "SOURCE_COMMIT=$commit")
 if [[ -n ${GLM53_BASE_IMAGE:-} ]]; then args+=(--build-arg "BASE_IMAGE=$GLM53_BASE_IMAGE"); fi
 docker build --progress=plain "${args[@]}" -t "$IMAGE" .
-docker run --rm --entrypoint python3 "$IMAGE" /opt/glm53-cp8-dcp4-v1/install.py --verify-only
+docker run --rm --entrypoint python3 "$IMAGE" /opt/glm53-h200-ab/install.py --verify-only
 if [[ ${1:-} == --push ]]; then docker push "$IMAGE"; fi

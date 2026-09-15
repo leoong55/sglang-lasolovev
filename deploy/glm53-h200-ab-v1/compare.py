@@ -44,16 +44,15 @@ def check(a, b, mode):
             "--tp-size",
             "--pp-size",
             "--ep-size",
-            "--dcp-size",
             "--pp-max-micro-batch-size",
-            "--enable-prefill-cp",
-            "--cp-strategy",
-            "--enable-cp-decode-attn-tp",
-            "--dcp-comm-backend",
             "--cuda-graph-max-bs-decode",
             "--cuda-graph-bs-decode",
         }
-        allowed_env = {"SGLANG_ENABLE_CP_V2", "SGLANG_PP_LAYER_PARTITION"}
+        allowed_env = {"SGLANG_PP_LAYER_PARTITION"}
+    elif mode == "admit":
+        allowed_env = {"SGLANG_ENABLE_H200_ADMIT_FULL_NEED"}
+    elif mode == "short":
+        allowed_env = {"SGLANG_H200_SHORT_BYPASS_TOKENS"}
     elif mode == "park":
         allowed_env = {"SGLANG_ENABLE_H200_PARK_CHUNKED_PREFILL"}
     elif mode == "skip":
@@ -107,7 +106,9 @@ def main():
     p.add_argument("a")
     p.add_argument("b")
     p.add_argument(
-        "--mode", choices=("topology", "park", "skip", "image"), required=True
+        "--mode",
+        choices=("topology", "admit", "short", "park", "skip", "image"),
+        required=True,
     )
     x = p.parse_args()
     a = load(x.a)

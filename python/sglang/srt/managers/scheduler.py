@@ -3630,6 +3630,13 @@ class Scheduler(
             prefill_tile_block_m=prefill_tile_block_m,
         )
 
+        if envs.SGLANG_ENABLE_H200_ADMIT_FULL_NEED.get():
+            adder.full_need_reqs = [
+                *self.collect_inflight_reqs(),
+                *running_batch.reqs,
+                *([self.chunked_req] if self.chunked_req is not None else []),
+            ]
+
         if self.chunked_req is not None:
             self.chunked_req.init_next_round_input()
             self.chunked_req = adder.add_chunked_req(self.chunked_req)
@@ -3747,7 +3754,7 @@ class Scheduler(
                 # flag above; otherwise the next loop iteration stops at once.
                 if (
                     envs.SGLANG_ENABLE_H200_SKIP_NOT_FITTING.get()
-                    and res == AddReqResult.NO_TOKEN
+                    and res in (AddReqResult.NO_TOKEN, AddReqResult.SKIP)
                     and not added
                     and adder.budget_state() == AddReqResult.CONTINUE
                 ):

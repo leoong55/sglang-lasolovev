@@ -473,6 +473,7 @@ class AddReqResult(Enum):
     CONTINUE = auto()  # Continue to add requests
     NO_TOKEN = auto()  # No token left
     OTHER = auto()  # Other reasons to stop adding requests
+    SKIP = auto()  # Candidate exceeds the optional remaining short-bypass budget
 
 
 class PrefillAdder:
@@ -513,6 +514,9 @@ class PrefillAdder:
         self.rem_total_token_offset = num_mixed_decode_tokens
         self.cur_rem_token_offset = num_mixed_decode_tokens
 
+        self.full_need_reqs = None
+        self.short_bypass_limit = max(0, envs.SGLANG_H200_SHORT_BYPASS_TOKENS.get())
+        self.rem_short_bypass = self.short_bypass_limit // page_size * page_size
         self.req_states = None
         self.can_run_list = []
         self.preempt_list = []
@@ -590,6 +594,49 @@ class PrefillAdder:
         # Snapshot of scheduler waiting_queue length at the start of this
         # prefill pass. Used by PrefillDelayer's queue-based trigger.
         self.waiting_queue_len = waiting_queue_len
+
+    def full_need_fits(self, candidate: Req) -> bool:
+        """Reserve unfinished work across all PP microbatches, once per request.
+
+        Call with the candidate prefix locked. Allocated KV already occupies the
+        pool; queued extends in can_run_list do not, and must still be reserved.
+        This full-context ledger is for native, non-speculative MLA serving.
+        """
+        if self.full_need_reqs is None:
+            return True
+        live = {
+            id(r): r
+            for r in (*self.full_need_reqs, *self.can_run_list, candidate)
+            if not r.finished()
+        }
+        debt = 0
+        for r in live.values():
+            endpoint = len(r.origin_input_ids) + r.sampling_params.max_new_tokens
+            covered = max(r.kv.kv_allocated_len, r.kv.cache_protected_len)
+            if r is candidate:
+                covered = max(covered, len(r.prefix_indices))
+            remaining = max(
+                0, self.ceil_paged_tokens(endpoint) - self.ceil_paged_tokens(covered)
+            )
+            # Include alloc_extend's extra page; no credit for a future EOS.
+            debt += remaining + (self.page_size if remaining else 0)
+        free = (
+            self.token_to_kv_pool_allocator.available_size()
+            + self.tree_cache.evictable_size()
+        )
+        return debt <= free
+
+    def _short_bypass_fits(self, input_tokens: int) -> bool:
+        if self.dllm_config is not None or self.rem_chunk_tokens is None:
+            return False
+        paged = self.ceil_paged_tokens(input_tokens)
+        excess = max(0, paged - max(0, self.rem_chunk_tokens))
+        return (
+            paged <= self.short_bypass_limit
+            and excess > 0
+            and excess <= self.rem_short_bypass
+            and paged <= self.rem_input_tokens
+        )
 
     def _admitted_extend_lens(self) -> List[int]:
         return [int(getattr(req, "extend_input_len", 0)) for req in self.can_run_list]
@@ -825,7 +872,11 @@ class PrefillAdder:
             if self.rem_dllm_tokens <= 0:
                 return AddReqResult.OTHER
         else:
-            if self.rem_chunk_tokens is not None and self.rem_chunk_tokens <= 0:
+            if (
+                self.rem_chunk_tokens is not None
+                and self.rem_chunk_tokens <= 0
+                and self.rem_short_bypass < self.page_size
+            ):
                 return AddReqResult.OTHER
 
         return AddReqResult.CONTINUE
@@ -869,6 +920,8 @@ class PrefillAdder:
         if self.dllm_config is not None:
             self.rem_dllm_tokens -= extend_input_len
         elif self.rem_chunk_tokens is not None:
+            excess = max(0, extend_input_len - max(0, self.rem_chunk_tokens))
+            self.rem_short_bypass = max(0, self.rem_short_bypass - excess)
             self.rem_chunk_tokens -= extend_input_len
 
         # reprocessed_log_* is a subset of log_*; metrics_reporter subtracts it
@@ -1050,6 +1103,8 @@ class PrefillAdder:
                 self.tree_cache.dec_lock_ref(last_node)
 
     def add_one_req_ignore_eos(self, req: Req):
+        if not self.full_need_fits(req):
+            return AddReqResult.NO_TOKEN
         cand_extend_input_len = len(req.full_untruncated_fill_ids) - len(
             req.prefix_indices
         )
@@ -1141,6 +1196,7 @@ class PrefillAdder:
         elif (
             self.rem_chunk_tokens is None  # chunked prefill is disabled
             or cand_extend_input_len <= self.rem_chunk_tokens  # it is the last chunk
+            or self._short_bypass_fits(cand_extend_input_len)
         ):
             if (
                 tile_stop := self._check_prefill_tile_budget(cand_extend_input_len)
@@ -1161,6 +1217,8 @@ class PrefillAdder:
             )
         else:
             if self.rem_chunk_tokens <= 0:
+                if self.rem_short_bypass >= self.page_size:
+                    return AddReqResult.SKIP
                 return AddReqResult.OTHER
 
             # Chunked prefill
@@ -1258,6 +1316,8 @@ class PrefillAdder:
             return AddReqResult.OTHER
 
         with self._lock_node(req.last_node):
+            if not self.full_need_fits(req):
+                return AddReqResult.NO_TOKEN
             # self.rem_total_tokens may decrease after the lock acquisition
             if total_tokens >= self.rem_total_tokens:
                 return AddReqResult.NO_TOKEN
@@ -1338,7 +1398,11 @@ class PrefillAdder:
 
                 self._add_dllm_req(req, prefix_len)
                 self._req_inc_lock_ref(req)
-            elif chunk_tokens_limit is None or input_tokens <= chunk_tokens_limit:
+            elif (
+                chunk_tokens_limit is None
+                or input_tokens <= chunk_tokens_limit
+                or self._short_bypass_fits(input_tokens)
+            ):
                 if (
                     tile_stop := self._check_prefill_tile_budget(input_tokens)
                 ) is not None:
@@ -1364,6 +1428,8 @@ class PrefillAdder:
                     storage_hit_len=req.storage_hit_length,
                 )
             else:
+                if chunk_tokens_limit <= 0 and self.rem_short_bypass >= self.page_size:
+                    return AddReqResult.SKIP
                 # Make sure at least one page is available
                 trunc_len = chunk_tokens_limit // self.page_size * self.page_size
 

@@ -38,8 +38,39 @@ def arm(profile, **kwargs):
 
 
 class Profiles(unittest.TestCase):
+    def test_all_profiles_use_tilelang_and_exclude_context_parallelism(self):
+        for profile in (
+            "tp8-decode",
+            "pp2-decode",
+            "pp4-decode",
+            "tp8-archive",
+            "pp4-archive",
+        ):
+            a = arm(profile, patches=True)
+            args = compare.argv_map(a["container"]["args"])
+            self.assertEqual(args["--dsa-prefill-backend"], ["tilelang"])
+            self.assertEqual(args["--dsa-decode-backend"], ["tilelang"])
+            self.assertFalse(any("cp-" in k or "dcp" in k for k in args))
+            env = {e["name"]: e["value"] for e in a["container"]["env"]}
+            self.assertNotIn("SGLANG_ENABLE_CP_V2", env)
+            self.assertEqual(env["SGLANG_ENABLE_H200_ADMIT_FULL_NEED"], "1")
+            self.assertEqual(env["SGLANG_H200_SHORT_BYPASS_TOKENS"], "512")
+
+    def test_patched_tp_pp_profiles_have_identical_non_topology_options(self):
+        for pp in ("pp2-decode", "pp4-decode"):
+            compare.check(
+                arm("tp8-decode", patches=True), arm(pp, patches=True), "topology"
+            )
+
+    def test_backend_difference_is_not_a_topology_result(self):
+        a, b = arm("tp8-decode"), arm("pp4-decode")
+        i = b["container"]["args"].index("--dsa-decode-backend")
+        b["container"]["args"][i + 1] = "flashmla_kv"
+        with self.assertRaises(ValueError):
+            compare.check(a, b, "topology")
+
     def test_topology_comparison_changes_only_declared_fields(self):
-        compare.check(arm("tp8-dcp4-decode"), arm("pp4-decode"), "topology")
+        compare.check(arm("tp8-decode"), arm("pp4-decode"), "topology")
 
     def test_scheduler_comparison_changes_one_switch(self):
         compare.check(arm("pp4-decode"), arm("pp4-decode", skip=True), "skip")
@@ -61,7 +92,7 @@ class Profiles(unittest.TestCase):
     def test_model_quantization_cannot_change_inside_topology_ab(self):
         with self.assertRaises(ValueError):
             compare.check(
-                arm("tp8-dcp4-decode"),
+                arm("tp8-decode"),
                 arm("pp4-decode", weights="fp8", model_pvc="actual"),
                 "topology",
             )

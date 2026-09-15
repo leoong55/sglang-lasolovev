@@ -11,12 +11,14 @@ C=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["request
 NS=inf-glm53
 NAME=sglang-glm53-h200-ab
 URL=${URL:-http://sglang-glm53-h200-ab.inf-glm53.svc:8080}
+render_opts=(--patches --weights "${WEIGHTS:-w4afp8}" --context "${CONTEXT:-500000}" --mem-fraction "${MEM_FRACTION:-0.90}")
+[[ -z ${MODEL_PVC:-} ]] || render_opts+=(--model-pvc "$MODEL_PVC")
 mkdir -p "$RESULTS"
 for arm in A1 B1 B2 A2; do
-  profile=tp8-dcp4-decode
-  [[ $arm == B* ]] && profile=pp4-decode
+  profile=tp8-decode
+  [[ $arm == B* ]] && profile=${PP_PROFILE:-pp4-decode}
   yaml_path="$RESULTS/$arm.yaml"
-  python3 "$KIT/render.py" --image "$IMAGE" --profile "$profile" --concurrency "$C" > "$yaml_path"
+  python3 "$KIT/render.py" --image "$IMAGE" --profile "$profile" --concurrency "$C" "${render_opts[@]}" > "$yaml_path"
   # Explicit restart also between B1/B2: radix/runtime state must not leak between runs.
   if kubectl -n "$NS" get deployment "$NAME" >/dev/null 2>&1; then
     kubectl -n "$NS" scale deployment "$NAME" --replicas=0
