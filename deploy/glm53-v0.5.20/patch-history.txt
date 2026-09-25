@@ -1,0 +1,25 @@
+7f7331fa4408ea32b1e508020b6a860a8cfea66d Backport Hopper DSA DCP for GLM-5.3 CP8/EP8/DCP4 first launch
+eeda8f9e174c3ade29e3532a5e77b7e89b01e7a7 Add profile-guided decode CUDA graph experiment for GLM-5.3 CP8/DCP4
+819468af5a3b2b490a0ab546f12f12069c6c108b Integrate Hopper Q8 sparse prefill with DSA CP+DCP
+258df599b5a53c756125f40cb61b08739dedb908 Reduce per-layer CP/DCP prefill gather overhead
+3534a03e40cbdbc59f811dac16dd474847a47d81 GLM-5.3: opt-in CP8 DCP4 prefill BCG with live eager attention
+65af0a3a1ed546f9dc2c7cb753970d84fc6192ab GLM-5.3: explicit 8k/16k/32k CP prefill graph buckets
+e861ac300d7677e9b664301986e2db3bacfefaee Integrate GLM53 DFlash2 with CP8 and DCP4 verification
+82a17a0c5c911c61b0ee02769a8593625b2e8ad1 Use masked index-kernel tails for CPU interpreter and report causal failures
+6526bef6bf959e203a0cc23dacdb2553f81c1e3e Pin NumPy 1.x for Triton 3.1 CPU interpreter ABI
+3bb44ae54d899066ae24ebb4aaab6f2a80ac2dee Integrate DCP HiCache with replicated DSA and DFlash sidecars
+cb6ea97b923cfae714fd4f9700f04e238b02022e Verify full DFlash draft KV survives relocated host-cache round trip
+1489983c6e5ca8645cc32ab45d57a59cde6ba140 Fix DFlash draft KV head allocation under target prefill CP
+1ff11c97049bb427345925be6fc003200ce25cef Distinguish DSA dispatch from internal kernels in GLM53 profile gates
+018f5c40a67a47293a998404e31cf31bf952cac9 Clarify DSA CP startup log before CUDA graph resolution
+80b93b7f815653b12735b292b4684a8821324c1b Align GLM53 DFlash graph capture masks and preserve opt-in CP prefill graphs
+1a03ba2a2501d6086aa3b864a28008883963fefa fix(glm53): compile CP capture lengths and align short-prefill LSE dispatch
+cc3b4e9629d22bb1715fae19ca8741d4ee53793e GLM53 v9.5: make DFlash, HiCache and launch capacity independent
+640535efa1896354992191573e0f137c2fba7fa9 Fix DFlash batches above graph capacity and add opt-in bounded GPU draft cache
+89d352f6fb8eadfa69f3fa78a7086dc448474e64 GLM53 v9.7: compact HiCache index layers and reuse continuous bounded draft windows
+2aa3716d0e9f4d55dca0e5c31dbef2b8c55a3dcf GLM53 v9.8: opt-in CP decode attention reduction fusion and isolated MoE comparison
+6bd52126422de3671558f3e412bba0cd57188aa8 glm53: add opt-in Humming W4 MoE backend with EP8 validation
+1f1171df23c98755c7d479d8befe071a9e13ecbe Fix standard EP Humming launch estimate and bound CP prefill graph padding
+3e2b2c5c5176fbf665631b6a1f4961b337707965 Enable Humming DFlash diagnostics and native EAGLE profiles from GLM53 v9.10
+ca6f232142316e660c2defc3b1ee2b4ddc197818 Fix DFlash draft graph admission and add bounded verify block controls (v9.13)
+219206f7db9f7ffb24dad2605edf72af62d4939e GLM53 v9.14: preserve scheduler cancellation and close SSE generators

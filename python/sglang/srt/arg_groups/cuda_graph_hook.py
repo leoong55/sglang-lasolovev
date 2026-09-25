@@ -276,6 +276,7 @@ def disable_breakable_cudagraph_if_incompatible(server_args: Any):
         uses_kda_attention,
     )
     from sglang.srt.layers.cp.bcg import supports_prefill_cp_bcg
+    from sglang.srt.layers.cp.glm53_bcg import supports as supports_glm53_bcg
 
     rules = [
         (
@@ -301,7 +302,7 @@ def disable_breakable_cudagraph_if_incompatible(server_args: Any):
         # Capture builds a dummy extend forward with attn_dcp_metadata=None.
         (
             "decode context parallel (dcp_size > 1)",
-            lambda: cfg.dcp_size > 1,
+            lambda: cfg.dcp_size > 1 and not supports_glm53_bcg(server_args),
         ),
         # TBO capture is unsupported.
         (

@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import torch
-
 from sglang.srt.arg_groups.overrides import (
     attention_backends_of,
     resolved_view,
@@ -47,6 +46,10 @@ if TYPE_CHECKING:
 def supports_prefill_cp_bcg(server_args: ServerArgs) -> bool:
     """Return whether the selected prefill-CP configuration supports BCG."""
 
+    from sglang.srt.layers.cp.glm53_bcg import supports
+
+    if supports(server_args):
+        return True
     cfg = resolving_view(server_args)
     resolved = resolved_view(server_args)
     prefill_attention_backend, _ = attention_backends_of(resolved_view(server_args))
@@ -68,6 +71,12 @@ def filter_prefill_cp_bcg_capture_num_tokens(
     capture_num_tokens: list[int], server_args: ServerArgs
 ) -> list[int]:
     """Keep only token buckets where the zigzag CP strategy can run."""
+    from sglang.srt.layers.cp.glm53_bcg import supports
+
+    if supports(server_args):
+        from sglang.srt.layers.cp.glm53_bcg import validate_capture_sizes
+
+        return validate_capture_sizes(capture_num_tokens)
     min_num_tokens = resolved_view(server_args).attn_cp_size * 2
     filtered = [size for size in capture_num_tokens if size >= min_num_tokens]
     if not filtered:
@@ -119,6 +128,11 @@ class PrefillCPBCGInput:
     def required_local_tokens(self, extend_seq_lens: Any) -> Optional[int]:
         """Return the aligned CP-local rows required by a live zigzag layout."""
         strategy = get_cp_strategy()
+        from sglang.srt.layers.cp.glm53_bcg import enabled, exact_local_rows
+        from sglang.srt.layers.cp.interleave import InterleaveCPStrategy
+
+        if enabled() and isinstance(strategy, InterleaveCPStrategy):
+            return exact_local_rows(extend_seq_lens, strategy.cp_size)
         if not isinstance(strategy, ZigzagCPStrategy) or extend_seq_lens is None:
             return None
 
@@ -167,6 +181,19 @@ class PrefillCPBCGInput:
         capture_num_tokens: list[int],
         max_padding_factor: int,
     ) -> Optional[int]:
+        from sglang.srt.layers.cp.glm53_bcg import enabled
+        from sglang.srt.layers.cp.interleave import InterleaveCPStrategy
+
+        if enabled() and isinstance(get_cp_strategy(), InterleaveCPStrategy):
+            from sglang.srt.layers.cp.glm53_bcg import replay_bucket
+
+            bucket = replay_bucket(
+                num_tokens, extend_seq_lens, capture_num_tokens, get_cp_strategy().cp_size,
+                max_padding_factor=max_padding_factor,
+            )
+            if bucket is None or self.bucket_local_tokens.get(bucket) != bucket // 8:
+                return None
+            return bucket
         required_local_tokens = self.required_local_tokens(extend_seq_lens)
         if required_local_tokens is None:
             return None
@@ -215,6 +242,10 @@ class PrefillCPBCGInput:
                 cp_size = len(metadata.per_rank_actual_token)
                 metadata.per_rank_actual_token = [captured_local_tokens] * cp_size
                 metadata.max_rank_len = [captured_local_tokens] * cp_size
+                if forward_batch.global_num_tokens_cpu is not None:
+                    from sglang.srt.layers.dp_attention import set_local_dp_buffer_len
+
+                    set_local_dp_buffer_len(captured_local_tokens * cp_size)
 
         raw_tokens = int(forward_batch.extend_num_tokens)
         global_input_ids = forward_batch.input_ids[:raw_tokens]
@@ -256,6 +287,10 @@ class PrefillCPBCGInput:
         forward_batch.input_embeds = input_embeds
         forward_batch.positions = positions
         self.live_local_tokens = live_local_tokens
+        from sglang.srt.layers.cp.glm53_bcg import prepare_dcp, supports
+
+        if supports(runner.model_runner.server_args):
+            prepare_dcp(runner, forward_batch)
 
 
 def execute_prefill_cp_bcg(
@@ -281,6 +316,21 @@ def execute_prefill_cp_bcg(
         num_tokens=static_num_tokens,
         raw_num_tokens=raw_num_tokens,
     ):
+        from sglang.srt.layers.cp.glm53_bcg import supports
+
+        if supports(runner.model_runner.server_args):
+            count = getattr(runner, "_glm53_bcg_replays", 0) + 1
+            runner._glm53_bcg_replays = count
+            if count == 1 or count % 100 == 0:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "GLM53 BCG replay=%d global_tokens=%d local_rows=%d raw_tokens=%d",
+                    count,
+                    static_num_tokens,
+                    cp_input.live_local_tokens,
+                    raw_num_tokens,
+                )
         local_output = runner.backend.replay(
             ShapeKey(size=static_num_tokens),
             static_forward_batch,
@@ -307,6 +357,19 @@ def execute_prefill_cp_bcg(
             static_forward_batch,
             torch.cuda.current_stream(),
         )
+        # DFlash consumes one feature row for every GLOBAL prompt token.
+        # Gathering logits hiddens alone leaves its features CP-local (1/8).
+        # Match EagerRunner's packed-tensor and legacy-list contract.
+        if aux_hidden_states is not None:
+            if isinstance(aux_hidden_states, torch.Tensor):
+                aux_hidden_states = cp_gather_after_forward(
+                    aux_hidden_states, static_forward_batch, torch.cuda.current_stream()
+                )
+            else:
+                aux_hidden_states = [
+                    cp_gather_after_forward(aux, static_forward_batch, torch.cuda.current_stream())
+                    for aux in aux_hidden_states
+                ]
         return model.logits_processor(
             forward_batch.input_ids,
             hidden_states,

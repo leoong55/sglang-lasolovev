@@ -28,7 +28,7 @@ After all-gather, tokens are restored to the original order:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
@@ -55,6 +55,8 @@ class InterleaveContextParallelMetadata(BaseContextParallelMetadata):
     per_rank_actual_token: Optional[List[int]] = None
     max_rank_len: Optional[List[int]] = None
     per_rank_logical_token: Optional[List[int]] = None
+    # Only the eager DCP-prefill path uses these batch-local, per-stream buffers.
+    gather_workspaces: dict = field(default_factory=dict, repr=False, compare=False)
 
 
 class InterleaveCPStrategy(ContextParallelStrategy):
@@ -196,6 +198,11 @@ class InterleaveCPStrategy(ContextParallelStrategy):
         if physical_rank_len == 0:
             return x.new_empty((0, *x.shape[1:]))
 
+        if get_parallel().dcp_enabled:
+            return self._gather_interleaved_tensor_dcp(
+                x, metadata, total_tokens, physical_rank_len, local_logical_len
+            )
+
         padded_x = x.new_zeros((physical_rank_len, *x.shape[1:]))
         padded_x[:local_logical_len] = x[:local_logical_len]
 
@@ -210,6 +217,56 @@ class InterleaveCPStrategy(ContextParallelStrategy):
             flat_indices % self.cp_size
         ) * physical_rank_len + flat_indices // self.cp_size
         return gathered.index_select(0, gather_indices)
+
+    def _gather_interleaved_tensor_dcp(
+        self, x, metadata, total_tokens, physical_rank_len, local_logical_len
+    ):
+        """Reuse transport storage, but return independently owned KV/hidden data.
+
+        The interleave permutation is a rank/row transpose followed by trimming
+        trailing padding. It needs no arange/modulo/divide/index tensor. Keeping
+        the returned tensor separate is essential: later indexer/attention work
+        may still read it after another gather has reused the transport buffers.
+        """
+        cp_size = self.cp_size
+        if not (0 <= local_logical_len <= physical_rank_len):
+            raise RuntimeError("Invalid logical/physical lengths for DCP CP gather.")
+        if total_tokens > cp_size * physical_rank_len:
+            raise RuntimeError("DCP CP gather output exceeds its physical token count.")
+        parallel = get_parallel()
+        stream_id = torch.cuda.current_stream(x.device).cuda_stream if x.is_cuda else None
+        symmetric = is_allocation_symmetric()
+        key = (
+            x.device,
+            x.dtype,
+            stream_id,
+            id(parallel.attn_cp_group),
+            symmetric,
+            cp_size,
+            physical_rank_len,
+            local_logical_len,
+            tuple(x.shape[1:]),
+        )
+        workspace = metadata.gather_workspaces.get(key)
+        if workspace is None:
+            # Padding is initialized once and never overwritten by the copies
+            # below. The key includes logical length, dtype, shape and stream.
+            padded_x = x.new_zeros((physical_rank_len, *x.shape[1:]))
+            with use_symmetric_memory(parallel.attn_cp_group, disabled=not symmetric):
+                gathered = x.new_empty((cp_size * physical_rank_len, *x.shape[1:]))
+            workspace = (padded_x, gathered)
+            metadata.gather_workspaces[key] = workspace
+        padded_x, gathered = workspace
+        padded_x[:local_logical_len].copy_(x[:local_logical_len])
+        attn_cp_all_gather_into_tensor(gathered, padded_x)
+
+        # Explicit allocation/copy also prevents aliasing in degenerate shapes
+        # where reshape(transpose(...)) could return a view of the workspace.
+        result = x.new_empty((cp_size * physical_rank_len, *x.shape[1:]))
+        result.view(physical_rank_len, cp_size, *x.shape[1:]).copy_(
+            gathered.view(cp_size, physical_rank_len, *x.shape[1:]).transpose(0, 1)
+        )
+        return result[:total_tokens]
 
     def get_supported_attention_backend(self):
         return [CPAttentionBackendKind.DSA]

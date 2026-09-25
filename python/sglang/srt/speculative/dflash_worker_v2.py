@@ -257,6 +257,10 @@ class _SelectorDraftSampler:
     def stage_sampling_params(self, *, bs: int, sampling_info) -> None:
         """Host-side refresh of the static sampling params; must run before the draft
         graph replay that consumes them."""
+        # Batches above the capture capacity use the eager selector. Never resize
+        # a view into these buffers: CUDA graphs retain their original addresses.
+        if bs > self.temperatures.numel():
+            return
         if sampling_info is None or not self.sampling_enabled:
             self.temperatures[:bs].fill_(1.0)
             self.greedy_mask[:bs].fill_(True)
@@ -379,27 +383,48 @@ class DFlashWorkerV2(BaseSpecWorker):
         self.page_size = get_schedule().page_size
         # Normalized in arg_groups.speculative_hook.handle_speculative_decoding.
         self.draft_window_size: Optional[int] = get_spec().speculative_draft_window_size
+        from sglang.srt.layers.cp.glm53_draft_layout import bounded_draft_enabled
+        self.use_bounded_draft_cache = bounded_draft_enabled()
+        if self.use_bounded_draft_cache:
+            from sglang.srt.layers.cp.glm53_dflash import supports_dflash_dcp
+            from sglang.srt.runtime_context import get_disagg, get_memory
+            if not supports_dflash_dcp(server_args):
+                raise ValueError("Bounded draft is restricted to the GLM53 CP8/DCP4 profile")
+            if (get_memory().enable_unified_memory
+                    or get_disagg().disaggregation_mode in ("prefill", "decode")
+                    or get_disagg().enable_pdmux):
+                raise ValueError("Bounded draft requires colocated execution with the ordinary memory pool")
+            self.draft_window_size = 2048
         self.use_compact_draft_cache = self.draft_window_size is not None
         self.device = target_worker.device
 
         self._warned_sampling_fallback = False
         self._draft_probs_buf = None
         self._logged_first_verify = False
+        from sglang.srt.layers.cp.glm53_dflash import supports_dflash_dcp
+        from sglang.srt.layers.cp.glm53_dflash_diagnostics import DFlashDiagnostics
+
+        self._glm53_diagnostics = DFlashDiagnostics(self.device, self.ps.tp_rank)
+        # CP presents DP-attention metadata, but all eight ranks participate in
+        # this narrow profile. Its draft retains full TP and collective graphs.
+        self._draft_uses_dp_attention = (
+            get_parallel().enable_dp_attention and not supports_dflash_dcp(server_args)
+        )
         self._full_embed_gpu: Optional[torch.Tensor] = None
         # Under dp attention, peer DP ranks run different (idle) paths, so
         # spec broadcasts must stay within the attn-TP group.
         self._tp_sync = SpecTpSync(
             get_parallel().attn_tp_group
-            if get_parallel().enable_dp_attention
+            if self._draft_uses_dp_attention
             else get_tp_group()
         )
 
         # Under dp attention, the draft worker runs on the per-DP attn-TP
         # group, independent of idle peer DP ranks.
         self.draft_tp_context = (
-            draft_tp_context if get_parallel().enable_dp_attention else empty_context
+            draft_tp_context if self._draft_uses_dp_attention else empty_context
         )
-        if get_parallel().enable_dp_attention:
+        if self._draft_uses_dp_attention:
             draft_init_ctx = draft_tp_context(get_parallel().attn_tp_group)
         else:
             draft_init_ctx = empty_context()
@@ -543,7 +568,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         self._draft_greedy_rank_index_buf: Optional[torch.Tensor] = None
         self._draft_greedy_selected_ids_buf: Optional[torch.Tensor] = None
         self._draft_greedy_index_cap: int = 0
-        self._use_fused_kv_materialize = is_cuda() or is_hip() or is_xpu()
+        self._use_fused_kv_materialize = (is_cuda() or is_hip() or is_xpu()) and not self.use_bounded_draft_cache
         self._fused_kv_helper: Optional[object] = None
         if self._use_fused_kv_materialize:
             self._init_fused_kv_helper()
@@ -613,7 +638,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             capture_decode_cuda_graph = (
                 get_exec().graph.cuda_graph_config.decode.backend != Backend.DISABLED
             )
-            if get_parallel().enable_dp_attention and capture_decode_cuda_graph:
+            if self._draft_uses_dp_attention and capture_decode_cuda_graph:
                 # Idle DP ranks skip the draft step, so they cannot join a
                 # shared graph capture/replay; keep the draft eager under dp
                 # attention.
@@ -631,6 +656,10 @@ class DFlashWorkerV2(BaseSpecWorker):
                     group=get_tp_group(),
                 )
                 if available_mem < 1.0:
+                    if self._glm53_diagnostics.policy == "require":
+                        raise RuntimeError(
+                            "GLM53 DFLASH requires draft CUDA graphs but available GPU memory is below 1 GiB"
+                        )
                     capture_decode_cuda_graph = False
                     logger.warning(
                         "Disable DFLASH draft cuda graph because only %.2f GB GPU "
@@ -789,8 +818,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             self.draft_model.lm_head = lm_head
             if self.ps.tp_rank == 0:
                 logger.info(
-                    "DFLASH selector decode folded into the draft cuda graph "
-                    "(sampling_enabled=%s).",
+                    "DFLASH selector capture hook registered (sampling_enabled=%s); "
+                    "actual replay is reported by GLM53 DFLASH execution.",
                     self._selector_sampling_enabled,
                 )
             return _SelectorDraftSampler(
@@ -852,7 +881,8 @@ class DFlashWorkerV2(BaseSpecWorker):
             org_vocab_start = int(shard.org_vocab_start_index)
         if self.ps.tp_rank == 0:
             logger.info(
-                "DFLASH draft greedy head folded into the draft cuda graph (tp=%d).",
+                "DFLASH draft greedy head capture hook registered (tp=%d); "
+                "actual replay is reported by GLM53 DFLASH execution.",
                 tp_group.world_size,
             )
         return _DflashDraftSampler(
@@ -1001,7 +1031,8 @@ class DFlashWorkerV2(BaseSpecWorker):
         # sliding-window path, the draft req->token view is rebuilt from committed
         # target state before each draft forward, so there is nothing persistent
         # to flush here.
-        pass
+        if self.use_bounded_draft_cache:
+            self.draft_model_runner.token_to_kv_pool.clear_bounded_cache()
 
     def _gather_req_to_token_masked(
         self,
@@ -1250,7 +1281,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         the full embedding once during init and keep it replicated, making
         the draft block-id lookup a collective-free on-device F.embedding.
         """
-        if not get_parallel().enable_dp_attention:
+        if not self._draft_uses_dp_attention:
             return
 
         tp_group = get_tp_group()
@@ -1707,6 +1738,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         positions: torch.Tensor,
         cache_loc_2d: Optional[torch.Tensor] = None,
         commit_lens: Optional[torch.Tensor] = None,
+        context_request_ids: Optional[torch.Tensor] = None,
     ) -> None:
         """Materialize target context features into the draft KV cache at explicit slots.
 
@@ -1803,6 +1835,37 @@ class DFlashWorkerV2(BaseSpecWorker):
             self.draft_tp_context(self.draft_model_runner.tp_group),
         ):
             ctx_hidden = self.draft_model.project_target_hidden(target_hidden)
+
+            if self.use_bounded_draft_cache:
+                if context_request_ids is None:
+                    raise ValueError("Bounded draft append requires context request ownership")
+                # Keep the legacy projection/norm/RoPE sequence exactly. Filter
+                # rejected rows only after all per-layer context preparation.
+                layers = []
+                for layer in self.draft_model.layers:
+                    attn = layer.self_attn
+                    prepared = self.draft_model.prepare_context_hidden_for_kv(layer, ctx_hidden)
+                    k, v = attn.kv_proj_only(prepared)
+                    k = attn.apply_k_rope(positions, attn.apply_k_norm(k))
+                    layers.append(torch.stack((k.view(-1, 1, 128), v.view(-1, 1, 128)), dim=1))
+                payload = torch.stack(layers, dim=1)
+                if cache_loc_2d is not None:
+                    offsets = torch.arange(cache_loc_2d.shape[1], device=device)
+                    valid = (offsets[None, :] < commit_lens[:, None]).reshape(-1)
+                    # CUDA boolean indexing performs nonzero to determine each
+                    # result shape. Compact ONCE and reuse fixed-size gathers;
+                    # four independent mask reads otherwise synchronize four times.
+                    selected = valid.nonzero(as_tuple=True)[0]
+                    cache_loc = cache_loc.index_select(0, selected)
+                    context_request_ids = context_request_ids.index_select(0, selected)
+                    positions = positions.index_select(0, selected)
+                    payload = payload.index_select(0, selected)
+                self.draft_model_runner.token_to_kv_pool.commit_context(
+                    virtual=cache_loc, requests=context_request_ids,
+                    positions=positions, payload=payload,
+                    is_decode=cache_loc_2d is not None,
+                )
+                return
 
             if cache_loc_2d is not None:
                 bs = int(commit_lens.shape[0])
@@ -2251,6 +2314,10 @@ class DFlashWorkerV2(BaseSpecWorker):
                 target_hidden=logits_output.hidden_states,
                 cache_loc=batch.out_cache_loc,
                 positions=positions,
+                context_request_ids=(
+                    torch.repeat_interleave(batch.req_pool_indices, ctx_lens.to(torch.int64))
+                    if self.use_bounded_draft_cache else None
+                ),
             )
 
             # Avoid copying large hidden-state buffers to CPU in overlap scheduling.
@@ -2277,7 +2344,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             # verify forward (IDLE mode) so its cross-DP collectives stay in
             # lockstep with the active DP group; the draft block's
             # collectives are within-rank and skipped.
-            if get_parallel().enable_dp_attention:
+            if self._draft_uses_dp_attention:
                 idle_verify_input = DFlashVerifyInput(
                     draft_token=torch.empty((0,), dtype=torch.long, device=self.device),
                     positions=torch.empty((0,), dtype=torch.int64, device=self.device),
@@ -2351,6 +2418,8 @@ class DFlashWorkerV2(BaseSpecWorker):
         assert self._draft_seq_lens_cpu_buf is not None
 
         block_ids = self._draft_block_ids_buf[:bs]
+        diagnostics = self._glm53_diagnostics
+        diagnostics.start(bs)
         prefix_lens = batch.seq_lens
         positions_2d = self._draft_block_positions_buf[:bs]
         verify_out_cache_loc_2d = self._draft_verify_out_cache_loc_buf[:bs]
@@ -2426,7 +2495,31 @@ class DFlashWorkerV2(BaseSpecWorker):
         verify_out_cache_loc = verify_out_cache_loc_2d.reshape(-1)
 
         seq_lens_cpu = self._draft_seq_lens_cpu_buf[:bs]
-        if self.use_compact_draft_cache:
+        draft_out_cache_loc = verify_out_cache_loc
+        if self.use_bounded_draft_cache:
+            bounded_pool = self.draft_model_runner.token_to_kv_pool
+            draft_seq_lens, draft_out_cache_loc = bounded_pool.prepare_window(
+                target_table=self.model_runner.req_to_token_pool.req_to_token,
+                draft_table=self.draft_model_runner.req_to_token_pool.req_to_token,
+                request_ids=batch.req_pool_indices, prefix_lens=prefix_lens,
+                block_size=block_size,
+                request_owners=batch.reqs,
+            )
+            if bounded_pool.fastpath_enabled:
+                # FA planning accepts the same monotonic host upper bound used
+                # by compact draft. Exact paged visible lengths stay on device;
+                # applying the sawtooth page alignment to an overlap upper bound
+                # on CPU could under-estimate them.
+                bounded_pool.fill_seq_lens_cpu_bound(
+                    prefix_lens_cpu=batch.seq_lens_cpu,
+                    reserved_lens_cpu=draft_input.nxt_kv_lens_cpu,
+                    visible_lens=draft_seq_lens,
+                    out=seq_lens_cpu,
+                )
+            else:
+                seq_lens_cpu.copy_(draft_seq_lens.to("cpu"))
+            draft_seq_lens_sum = int(seq_lens_cpu.sum())
+        elif self.use_compact_draft_cache:
             # Rebuild the draft-local sliding-window view from committed target state.
             draft_prefix_lens = self._compute_compact_draft_seq_lens(prefix_lens)
             self._fill_compact_seq_lens_cpu_bound(
@@ -2469,7 +2562,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             input_ids=block_ids.flatten(),
             req_pool_indices=batch.req_pool_indices,
             seq_lens=draft_seq_lens,
-            out_cache_loc=verify_out_cache_loc,
+            out_cache_loc=draft_out_cache_loc,
             seq_lens_sum=draft_seq_lens_sum,
             seq_lens_cpu=seq_lens_cpu,
             positions=positions,
@@ -2483,7 +2576,15 @@ class DFlashWorkerV2(BaseSpecWorker):
                 else None
             ),
             global_num_token_non_padded_cpu=bs * block_size,
+            can_run_decode_cuda_graph=batch.can_run_decode_cuda_graph,
         )
+        # DSA CP enables the MLP synchronization machinery even with DP=1.
+        # Unlike target verify, this batch does not pass through init_new().
+        # Carry the scheduler's vote AND scale its request counts by the draft
+        # width through the same method used by target verify. Leaving the vote
+        # at False rejects every draft replay; forcing it True would bypass the
+        # scheduler's cross-rank agreement. This also preserves eager fallback.
+        forward_batch.init_mlp_sync_metadata(batch, self.device)
 
         if self.selector is not None:
             self._selector_sample = None
@@ -2493,6 +2594,7 @@ class DFlashWorkerV2(BaseSpecWorker):
                     bs=bs, sampling_info=batch.sampling_info
                 )
 
+        diagnostics.mark("prepare")
         with (
             torch.inference_mode(),
             self.draft_tp_context(self.draft_model_runner.tp_group),
@@ -2584,6 +2686,7 @@ class DFlashWorkerV2(BaseSpecWorker):
             GrammarTree.from_linear_chain(draft_tokens) if batch.has_grammar else None
         )
 
+        diagnostics.mark("draft")
         # --- 2) Target verify.
         # TARGET_VERIFY uses standard causal masking; custom masks are unnecessary here.
         custom_mask = None
@@ -2614,11 +2717,13 @@ class DFlashWorkerV2(BaseSpecWorker):
             batch.seq_lens_cpu = draft_input.nxt_kv_lens_cpu
             batch.seq_lens_sum = int(draft_input.nxt_kv_lens_sum)
 
-        verify_forward_batch, _ = verify_input.prepare_for_verify(
-            batch, self.target_worker
-        )
-        batch.seq_lens_cpu = seq_lens_cpu_backup
-        batch.seq_lens_sum = seq_lens_sum_backup
+        try:
+            verify_forward_batch, _ = verify_input.prepare_for_verify(
+                batch, self.target_worker
+            )
+        finally:
+            batch.seq_lens_cpu = seq_lens_cpu_backup
+            batch.seq_lens_sum = seq_lens_sum_backup
 
         # Idle-DP guard: an idle rank's eager verify contributes raw scheduler
         # counts while a graph-replaying rank assumes the padded bucket, so
@@ -2645,6 +2750,13 @@ class DFlashWorkerV2(BaseSpecWorker):
         )
         logits_output = target_out.logits_output
         can_run_cuda_graph = target_out.can_run_cuda_graph
+        diagnostics.graph_status(
+            bs=bs, width=block_size, draft=draft_out.can_run_graph,
+            verify=can_run_cuda_graph, sampler=folded,
+            draft_runner=self.draft_model_runner.decode_cuda_graph_runner,
+            draft_batch=forward_batch,
+            verify_runner=self.model_runner.decode_cuda_graph_runner,
+        )
 
         grammar_mask = None
         if batch.has_grammar:
@@ -2667,6 +2779,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         if grammar_mask is not None:
             grammar_mask.apply(logits_output.next_token_logits)
 
+        diagnostics.mark("verify")
         candidates = draft_tokens
         (
             accept_len,
@@ -2736,6 +2849,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         if on_publish is not None:
             on_publish(new_seq_lens)
 
+        diagnostics.mark("accept")
         # --- 3) Materialize committed verify-input tokens into draft KV cache.
         hidden = logits_output.hidden_states
         if hidden is None:
@@ -2750,7 +2864,11 @@ class DFlashWorkerV2(BaseSpecWorker):
             cache_loc_2d=verify_out_cache_loc_2d,
             positions=positions,
             commit_lens=commit_lens,
+            context_request_ids=(batch.req_pool_indices[:, None].expand(bs, block_size).reshape(-1)
+                                 if self.use_bounded_draft_cache else None),
         )
+        diagnostics.mark("cache")
+        diagnostics.finish(commit_lens)
 
         # Avoid copying large hidden-state buffers to CPU in overlap scheduling.
         logits_output.hidden_states = None

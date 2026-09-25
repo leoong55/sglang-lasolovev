@@ -26,9 +26,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-from transformers import PretrainedConfig
-
 from sglang.kernels.ops.attention.dsv4 import (
     silu_and_mul_clamp,
     silu_and_mul_contig_post_quant,
@@ -81,6 +78,8 @@ from sglang.srt.layers.communicator_dsa_cp import (
     maybe_prefetch_next_full_attention_kv,
 )
 from sglang.srt.layers.cp.cp_decode_attn_tp import get_cp_decode_attn_tp_ctx
+from sglang.srt.layers.cp import glm53_decode_fusion
+from sglang.srt.layers.cp.utils import is_cp_active
 from sglang.srt.layers.dcp.planner import (
     prepare_decode_context_parallel_metadata,
 )
@@ -141,7 +140,10 @@ from sglang.srt.model_executor.cuda_graph_config import (
     check_cuda_graph_backend,
 )
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
-from sglang.srt.model_executor.forward_context import get_attn_backend
+from sglang.srt.model_executor.forward_context import (
+    get_attn_backend,
+    get_token_to_kv_pool,
+)
 from sglang.srt.model_executor.runner import get_is_capture_mode
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph.context import (
     is_in_breakable_cuda_graph,
@@ -205,6 +207,8 @@ from sglang.srt.utils import (
     use_intel_amx_backend,
 )
 from sglang.srt.utils.custom_op import register_custom_op
+from torch import nn
+from transformers import PretrainedConfig
 
 if _use_aiter:
     from sglang.srt.layers.rocm_linear_utils import aiter_dsv3_router_gemm
@@ -2046,6 +2050,43 @@ class DeepseekV2AttentionMLA(
         llama_4_scaling: Optional[torch.Tensor] = None,
         prev_topk_indices: Optional[torch.Tensor] = None,
     ):
+        from sglang.srt.layers.cp.glm53_bcg import attention_break, enabled
+        from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph import (
+            is_in_breakable_cuda_graph,
+        )
+
+        if (
+            enabled()
+            and is_in_breakable_cuda_graph()
+            and is_cp_active(forward_batch)
+        ):
+            return attention_break(
+                self,
+                hidden_states,
+                layer_scatter_modes,
+                llama_4_scaling,
+                prev_topk_indices,
+            )
+        return self._forward_impl(
+            positions,
+            hidden_states,
+            forward_batch,
+            zero_allocator,
+            layer_scatter_modes,
+            llama_4_scaling,
+            prev_topk_indices,
+        )
+
+    def _forward_impl(
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        forward_batch: ForwardBatch,
+        zero_allocator: BumpAllocator,
+        layer_scatter_modes: LayerScatterModes = None,
+        llama_4_scaling: Optional[torch.Tensor] = None,
+        prev_topk_indices: Optional[torch.Tensor] = None,
+    ):
         s = self.forward_prepare(
             positions=positions,
             hidden_states=hidden_states,
@@ -2446,15 +2487,21 @@ class DeepseekV2DecoderLayer(nn.Module):
         )
 
         with self.self_attn.maybe_use_decode_attn_tp(forward_batch):
-            hidden_states = self.self_attn(
-                positions=positions,
-                hidden_states=hidden_states,
-                forward_batch=forward_batch,
-                zero_allocator=zero_allocator,
-                llama_4_scaling=llama_4_scaling,
-                layer_scatter_modes=self.layer_scatter_modes,
-                prev_topk_indices=prev_topk_indices,
+            fuse_cp_attention = glm53_decode_fusion.eligible(
+                self, forward_batch, hidden_states, residual
             )
+            with glm53_decode_fusion.defer_output_reduce(
+                self.self_attn.o_proj, fuse_cp_attention
+            ):
+                hidden_states = self.self_attn(
+                    positions=positions,
+                    hidden_states=hidden_states,
+                    forward_batch=forward_batch,
+                    zero_allocator=zero_allocator,
+                    llama_4_scaling=llama_4_scaling,
+                    layer_scatter_modes=self.layer_scatter_modes,
+                    prev_topk_indices=prev_topk_indices,
+                )
         if isinstance(hidden_states, tuple):
             hidden_states, topk_indices = hidden_states
         else:
@@ -2465,9 +2512,14 @@ class DeepseekV2DecoderLayer(nn.Module):
             forward_batch, next_full_attention_layer_id
         )
 
-        hidden_states, residual = self.layer_communicator.prepare_mlp(
-            hidden_states, residual, forward_batch
-        )
+        if fuse_cp_attention:
+            hidden_states, residual = glm53_decode_fusion.finish(
+                hidden_states, residual, self.post_attention_layernorm
+            )
+        else:
+            hidden_states, residual = self.layer_communicator.prepare_mlp(
+                hidden_states, residual, forward_batch
+            )
 
         fuse_mlp_allreduce = (
             self.layer_communicator.should_fuse_mlp_allreduce_with_next_layer(
@@ -3137,6 +3189,17 @@ class DeepseekV2ForCausalLM(nn.Module, DeepseekV2WeightLoaderMixin):
         kv_cache_device,
         create_chunked_prefix_cache_kv_indices_fn,
     ):
+        kv_buffer_token_padding = 1
+        if is_deepseek_dsa(self.config):
+            # DSA TP+DCP uses Q gather and does not need a temporary KV view.
+            # CP+DCP gathers KV into a temporary buffer whose row layout and
+            # dtype match the token-to-KV pool values supplied by the caller.
+            if not (is_dsa_enable_prefill_cp() and get_parallel().attn_cp_size > 1):
+                return None
+            token_to_kv_pool = get_token_to_kv_pool()
+            # FlashMLA reshapes the flat gathered storage into physical pages.
+            # Logical DCP indices cover only the valid rows; padding is storage-only.
+            kv_buffer_token_padding = token_to_kv_pool.page_size
         return prepare_decode_context_parallel_metadata(
             seq_lens=seq_lens,
             extend_prefix_lens=extend_prefix_lens,
@@ -3149,6 +3212,7 @@ class DeepseekV2ForCausalLM(nn.Module, DeepseekV2WeightLoaderMixin):
             kv_cache_dtype=kv_cache_dtype,
             kv_cache_device=kv_cache_device,
             create_chunked_prefix_cache_kv_indices_fn=create_chunked_prefix_cache_kv_indices_fn,
+            kv_buffer_token_padding=kv_buffer_token_padding,
         )
 
 

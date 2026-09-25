@@ -101,6 +101,8 @@ def transform_index_page_table_decode_kernel(
     result_ptr: torch.Tensor,
     page_size: tl.constexpr,
     page_table_row_stride: tl.constexpr,
+    dcp_size: tl.constexpr,
+    dcp_rank: tl.constexpr,
 ):
     TOPK: tl.constexpr = 2048
     req_id = tl.program_id(0)
@@ -112,6 +114,10 @@ def transform_index_page_table_decode_kernel(
     loaded_topk_indices = tl.load(topk_indices_ptr + offset)
     mask = loaded_topk_indices >= 0
     loaded_kv_indices = tl.load(page_table_ptr + loaded_topk_indices, mask=mask)
+    if dcp_size > 1:
+        # Keep slots owned by this rank as local rows; others become -1.
+        mask = mask & (loaded_kv_indices % dcp_size == dcp_rank)
+        loaded_kv_indices = loaded_kv_indices // dcp_size
     tl.store(result_ptr + offset, loaded_kv_indices, mask=mask)
     tl.store(result_ptr + offset, -1, mask=~mask)
 
@@ -125,6 +131,7 @@ def transform_index_page_table_prefill_kernel(
     topk_indices_ptr: torch.Tensor,
     cu_seqlens_q_ptr: torch.Tensor,
     result_ptr: torch.Tensor,
+    causal_seq_lens_ptr: torch.Tensor,
     page_table_stride_0,
     page_table_stride_1: tl.constexpr,
     topk_indices_stride_0: tl.constexpr,
@@ -132,9 +139,13 @@ def transform_index_page_table_prefill_kernel(
     result_stride_0: tl.constexpr,
     result_stride_1: tl.constexpr,
     PAGE_TABLE_IS_EXPANDED: tl.constexpr,
+    HAS_CAUSAL_LENS: tl.constexpr,
+    PAGE_TABLE_WIDTH: tl.constexpr,
     TOPK: tl.constexpr,
     BLOCK_Q: tl.constexpr,
     BLOCK_TOPK: tl.constexpr,
+    dcp_size: tl.constexpr,
+    dcp_rank: tl.constexpr,
 ):
     request_id = tl.program_id(0)
     query_offsets = tl.program_id(1) * BLOCK_Q + tl.arange(0, BLOCK_Q)
@@ -142,9 +153,8 @@ def transform_index_page_table_prefill_kernel(
 
     query_start = tl.load(cu_seqlens_q_ptr + request_id)
     query_end = tl.load(cu_seqlens_q_ptr + request_id + 1)
-    # Grid axis 1 spans the batch-max extend len; fully-masked blocks store nothing.
-    if query_start + tl.program_id(1) * BLOCK_Q >= query_end:
-        return
+    # The row mask below handles empty blocks as well as request tails.
+    # Keep the kernel free of dynamic early returns (also CPU-interpretable).
     token_indices = query_start + query_offsets
     mask = (token_indices[:, None] < query_end) & (topk_offsets[None, :] < TOPK)
 
@@ -155,7 +165,14 @@ def transform_index_page_table_prefill_kernel(
         mask=mask,
         other=-1,
     )
-    valid_topk_mask = mask & (loaded_topk_indices >= 0)
+    valid_topk_mask = mask & (loaded_topk_indices >= 0) & (loaded_topk_indices < PAGE_TABLE_WIDTH)
+    if HAS_CAUSAL_LENS:
+        causal_len = tl.load(
+            causal_seq_lens_ptr + token_indices,
+            mask=token_indices < query_end,
+            other=0,
+        )
+        valid_topk_mask = valid_topk_mask & (loaded_topk_indices < causal_len[:, None])
 
     if PAGE_TABLE_IS_EXPANDED:
         page_table_rows = token_indices
@@ -168,6 +185,10 @@ def transform_index_page_table_prefill_kernel(
         mask=valid_topk_mask,
         other=-1,
     )
+    if dcp_size > 1:
+        # DCP owner filter: keep slots on this rank, map global -> local row.
+        owned_mask = valid_topk_mask & (loaded_kv_indices % dcp_size == dcp_rank)
+        loaded_kv_indices = tl.where(owned_mask, loaded_kv_indices // dcp_size, -1)
     tl.store(
         result_ptr
         + token_indices[:, None] * result_stride_0
@@ -182,6 +203,8 @@ def transform_index_page_table_decode_fast(
     topk_indices: torch.Tensor,
     result: Optional[torch.Tensor] = None,
     page_size: int = 1,
+    dcp_size: int = 1,
+    dcp_rank: int = 0,
 ) -> torch.Tensor:
     """
     Transform the page table according to topk indices for sparse topk attention.
@@ -206,6 +229,8 @@ def transform_index_page_table_decode_fast(
         result,
         page_size,
         page_table_row_stride=page_table.stride(0),
+        dcp_size=dcp_size,
+        dcp_rank=dcp_rank,
     )
     return result
 
@@ -218,10 +243,18 @@ def transform_index_page_table_prefill_fast(
     output_num_tokens: Optional[int] = None,
     page_table_is_expanded: bool = False,
     cu_seqlens_q: Optional[torch.Tensor] = None,
+    dcp_size: int = 1,
+    dcp_rank: int = 0,
+    causal_seq_lens: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     assert page_size == 1
     assert topk_indices.shape[1] == 2048
     real_num_tokens = sum(extend_lens_cpu)
+    if causal_seq_lens is not None:
+        if causal_seq_lens.ndim != 1 or causal_seq_lens.numel() < real_num_tokens:
+            raise ValueError("causal_seq_lens must cover every expanded query row")
+        if causal_seq_lens.device != topk_indices.device or not causal_seq_lens.is_contiguous():
+            raise ValueError("causal_seq_lens must be contiguous and on the query device")
     result = _allocate_prefill_result(topk_indices, real_num_tokens, output_num_tokens)
     if real_num_tokens == 0:
         return result
@@ -245,6 +278,7 @@ def transform_index_page_table_prefill_fast(
         topk_indices,
         cu_seqlens_q,
         result,
+        causal_seq_lens,
         page_table.stride(0),
         page_table.stride(1),
         topk_indices.stride(0),
@@ -252,9 +286,13 @@ def transform_index_page_table_prefill_fast(
         result.stride(0),
         result.stride(1),
         PAGE_TABLE_IS_EXPANDED=page_table_is_expanded,
+        HAS_CAUSAL_LENS=causal_seq_lens is not None,
+        PAGE_TABLE_WIDTH=page_table.shape[1],
         TOPK=topk_indices.shape[1],
         BLOCK_Q=block_q,
         BLOCK_TOPK=block_topk,
+        dcp_size=dcp_size,
+        dcp_rank=dcp_rank,
         num_warps=4,
     )
     return result

@@ -21,6 +21,7 @@ class ThinkingMode(str, Enum):
     THINKING = "thinking"
 
 
+import anyio
 import jinja2
 import orjson
 from fastapi import Request
@@ -253,6 +254,28 @@ def _build_video_config(request: ChatCompletionRequest) -> Optional[Dict[str, An
         # a model-specific public processor option.
         config["_question"] = question
     return config or None
+
+
+class _ClosingStreamingResponse(StreamingResponse):
+    """Close the primed request on disconnect, send failure or task cancellation."""
+
+    def __init__(self, *args, source_generator, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.source_generator = source_generator
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # Starlette's ASGI >= 2.4 send-error path skips background tasks.
+            # Shield waiter cleanup from repeated AnyIO cancel-scope delivery.
+            with anyio.CancelScope(shield=True):
+                try:
+                    await self.body_iterator.aclose()
+                finally:
+                    # The body may never have started (e.g. header-send failure),
+                    # but _handle_streaming_request already primed this generator.
+                    await self.source_generator.aclose()
 
 
 class OpenAIServingChat(OpenAIServingBase):
@@ -1209,6 +1232,9 @@ class OpenAIServingChat(OpenAIServingBase):
         """Process chat messages and apply chat template"""
         if self.default_chat_template_kwargs:
             ctk = dict(request.chat_template_kwargs or {})
+            # Request effort overrides server defaults; explicit template kwargs win.
+            if request.reasoning_effort is not None:
+                ctk.setdefault("reasoning_effort", request.reasoning_effort)
             for k, v in self.default_chat_template_kwargs.items():
                 ctk.setdefault(k, v)
             request.chat_template_kwargs = ctk
@@ -1219,6 +1245,15 @@ class OpenAIServingChat(OpenAIServingBase):
         normalize_hunyuan_reasoning_effort(
             request, self.reasoning_parser, self.template_manager.reasoning_config
         )
+
+        # GLM53_REASONING_MEDIUM_AS_HIGH_V2: preserve reasoning-fix4 image behavior.
+        if request.reasoning_effort == "medium":
+            request.reasoning_effort = "high"
+        if (request.chat_template_kwargs or {}).get("reasoning_effort") == "medium":
+            request.chat_template_kwargs = {
+                **request.chat_template_kwargs,
+                "reasoning_effort": "high",
+            }
 
         # GptOss model needs to keep special tokens for harmony parsing
         if self.is_gpt_oss or self.is_gemma4:
@@ -1748,14 +1783,17 @@ class OpenAIServingChat(OpenAIServingBase):
             return self.create_error_response(str(e))
 
         async def prepend_first_chunk():
-            yield first_chunk
-            async for chunk in generator:
-                yield chunk
+            try:
+                yield first_chunk
+                async for chunk in generator:
+                    yield chunk
+            finally:
+                await generator.aclose()
 
-        return StreamingResponse(
+        return _ClosingStreamingResponse(
             prepend_first_chunk(),
             media_type="text/event-stream",
-            background=self.tokenizer_manager.create_abort_task(adapted_request),
+            source_generator=generator,
         )
 
     async def _generate_chat_stream(
@@ -1793,6 +1831,9 @@ class OpenAIServingChat(OpenAIServingBase):
 
         stream_started = False
         error_aborted = False
+        generator = self.tokenizer_manager.generate_request(
+            adapted_request, raw_request
+        )
         try:
             include_usage, continuous_usage_stats = should_include_usage(
                 request.stream_options,
@@ -1807,9 +1848,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 and raw_request.headers.get("x-sglext-ids-framed") == "1"
             )
 
-            async for content in self.tokenizer_manager.generate_request(
-                adapted_request, raw_request
-            ):
+            async for content in generator:
                 index = content.get("index", 0)
 
                 prompt_tokens[index] = self._reported_prompt_tokens(
@@ -2086,6 +2125,10 @@ class OpenAIServingChat(OpenAIServingBase):
                 raise
             error = self.create_streaming_error_response(str(e))
             yield f"data: {error}\n\n"
+        finally:
+            # Close the request even when the SSE writer is cancelled at a yield,
+            # before another call to the TokenizerManager generator is made.
+            await generator.aclose()
 
         yield "data: [DONE]\n\n"
 

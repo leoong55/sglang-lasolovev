@@ -1,3 +1,5 @@
+> **GLM-5.3 W4AFP8 fork:** актуальный набор для будущей сборки на SGLang 0.5.20 — [deploy/glm53-v0.5.20](deploy/glm53-v0.5.20/README.md). Исходники перенесены; сборка и runtime-тесты пока не выполнялись. Старые deploy-каталоги сохранены как история.
+
 <div align="center" id="sglangtop">
 <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/assets/logo.png" alt="logo" width="400" margin="10px"></img>
 

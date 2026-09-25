@@ -1,0 +1,19 @@
+{
+  "upstream_tag": "v0.5.20",
+  "upstream_commit": "94602c9c2b7cbdb8efd5c52802dac6a1c180089e",
+  "upstream_url": "https://github.com/sgl-project/sglang",
+  "previous_base_commit": "0bcd822377da7b5718e674eaf9c870d349424dd1",
+  "patch_series_commit": "219206f7db9f7ffb24dad2605edf72af62d4939e",
+  "dsa_dcp_backport_pr": 36990,
+  "dsa_dcp_backport_commit": "c6aeb8b9d9128b816777e2b64cbf6603344e8fe1",
+  "c1_source_commit": "a55c416d1",
+  "c1_reasoning_commit": "706379ac116d8bc048fe080597ba486f86864d35",
+  "c1_chunk_patch_source": "deploy/glm53-c1/launch.py",
+  "base_image_tag": "lmsysorg/sglang:v0.5.20",
+  "base_image": "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f",
+  "image_metadata_checked": "2026-09-25",
+  "image_built_here": false,
+  "runtime_tests_run": false,
+  "gpu_validated": false,
+  "status": "prepared source; awaiting separate build and validation"
+}

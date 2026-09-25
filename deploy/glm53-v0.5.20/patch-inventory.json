@@ -1,0 +1,251 @@
+{
+  "upstream_commit": "94602c9c2b7cbdb8efd5c52802dac6a1c180089e",
+  "files": [
+    {
+      "path": "python/sglang/kernels/ops/attention/dcp_kernels.py",
+      "upstream_sha256": "899114581764650ec4efe0493a20f37622b138b3092866d8e15b276ed73c4a64",
+      "v914_sha256": "72ad9d7d5e7bdcdfcc614d5fcb6cddf278bd9447b3dee331d221d17ee7e361f0",
+      "ported_sha256": "f9f5e3341003ee403231fa7b097ef0dbc58e65183aff6cd8645b8eb6b18dfd2f"
+    },
+    {
+      "path": "python/sglang/kernels/ops/attention/dsa/cp_split.py",
+      "upstream_sha256": "08f17f96f4f901efc6a69e918a3e552bb143de2106036c50411175d5ea541ab5",
+      "v914_sha256": "a13034c255ac66e7983a97237e96d460e57ea385fa19f736bec96985e7c887a1",
+      "ported_sha256": "2dd19bff861e8b53708c2b7b415a913676831c49198588db98125a999d3229f2"
+    },
+    {
+      "path": "python/sglang/kernels/ops/attention/dsa/transform_index.py",
+      "upstream_sha256": "692d0aafb2236af1376c7fb77d3ba19e5dcbc72a398a159f8c6613a3dc4e8c31",
+      "v914_sha256": "fcb7a56a8dbac9cb1129b9627223a2250a3f7be948dfcf398e7eaa5fd6e664ea",
+      "ported_sha256": "e097a878ae4c7899b90b8d0edffabd41c068963dab9197426e86d475d1fcd8e7"
+    },
+    {
+      "path": "python/sglang/srt/arg_groups/cuda_graph_hook.py",
+      "upstream_sha256": "f11390ed5c0ecef2b107ec328b83ab796ad6837f096023c1b7da37a3f65f3ac9",
+      "v914_sha256": "a368c0c4b2a18f70e9f294359c31983ae1f00699083f992a0eee4efc584adf55",
+      "ported_sha256": "273732ef095ce28f4fdb29594a36e3c99fa99141d184c5008b194687e6008b6e"
+    },
+    {
+      "path": "python/sglang/srt/arg_groups/hicache_hook.py",
+      "upstream_sha256": "f88bd415633f76e59e81a46630113da81f1d21d686b9bb8c957336bedd17870a",
+      "v914_sha256": "193c540b040ab614b1d799698e07cd1b6ac074c536708d91c0e5c58f1f31b043",
+      "ported_sha256": "fe3577f70ada5ae99200046f9b8046b6cd3702d17f2e1266acca6e109d427bde"
+    },
+    {
+      "path": "python/sglang/srt/arg_groups/model_hook.py",
+      "upstream_sha256": "c3cca5010906b6ba83d4da5c048bf736cdfddeb49ee05661ae8f8ba916cd2beb",
+      "v914_sha256": "41e6e50a878ea38c51b4b5baa82ad985001390e154604ad7c885c974e312820e",
+      "ported_sha256": "f66394b97a27a5913c660d86298631e6472062b50f2691d74531d98752e6ebe7"
+    },
+    {
+      "path": "python/sglang/srt/arg_groups/model_overrides/deepseek_v2.py",
+      "upstream_sha256": "898fe9d3602ee2d5b0d3f65b165e43b7cbbdd2d9ef51eebb57b2d99dccc17004",
+      "v914_sha256": "0c0706fbae9cdff6aeb27210474d3b9547e48fb618cdece08147d3ed31794187",
+      "ported_sha256": "875bcd6f72de8fcabaf691a7dbf1fbdabb348138b4b4b09d9ec4794a7af20537"
+    },
+    {
+      "path": "python/sglang/srt/arg_groups/parallel_hook.py",
+      "upstream_sha256": "91bd691c52cdf23343bc244877d95c3edabe62f1ca1e543d2de16c0bbaf306cd",
+      "v914_sha256": "be1f66e6311effe32d34347ea04480580a45d975ba81d66c8a7f84c8b58ed543",
+      "ported_sha256": "67235c7e1cf7852ba595725fcc4f86c115e7552a565153fafe9538d793bc3e08"
+    },
+    {
+      "path": "python/sglang/srt/entrypoints/openai/serving_chat.py",
+      "upstream_sha256": "047e4391dc87816a62da34392eea9379fcb1f93025e70c3b327de8b596f59b09",
+      "v914_sha256": "bc54a722084fa2d195ffcd212504dd752b7e438e086f0dfb9ccf3dc2d4b1ce84",
+      "ported_sha256": "29b132cef2acdb97399c6e78f1aa16d335933b45833d51bb3cd442a459d4543f"
+    },
+    {
+      "path": "python/sglang/srt/environ.py",
+      "upstream_sha256": "c57c6ea499a47ed0bc80b299d2a6b224662bccb290af9083838b2b40aaa2adc0",
+      "v914_sha256": "7b9158cd328e492f92430e082fa33651c52e93623044727b207238f6db298576",
+      "ported_sha256": "54bf171c31ab537900bf7eae369d2ea26f62809fb52fbc1613eb10b17b0173e8"
+    },
+    {
+      "path": "python/sglang/srt/layers/attention/dsa_backend.py",
+      "upstream_sha256": "312f8477a9ddb9fcb358595b6c986ee825e0a773d9e5d185224f37972bee5d8c",
+      "v914_sha256": "3d868a4ba68ca17129e1e7014caa96ec0a95874420e999e691d32409999df0dc",
+      "ported_sha256": "b640c8daf4c9a03a1dda9a0796079d4bc1c0f545d672323db7814f7a2071affb"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/bcg.py",
+      "upstream_sha256": "06aadb71384f3cfe12c941e29776abb09e8df6b0548b2901286d3df47e76cf1b",
+      "v914_sha256": "aac3703fec9847ccbe399dd39fd3e457323facda365555950ec9fceb80233393",
+      "ported_sha256": "696b6953dc4d974cb12ecbd5a57ab05b3edcac4ecaa00dfe8594c01d1b5e24c8"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/glm53_bcg.py",
+      "upstream_sha256": null,
+      "v914_sha256": "b3d560817cf5d5d13adc36d55bf18283ebff9410e40f1201460a444df692c556",
+      "ported_sha256": "b3d560817cf5d5d13adc36d55bf18283ebff9410e40f1201460a444df692c556"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/glm53_decode_fusion.py",
+      "upstream_sha256": null,
+      "v914_sha256": "36e50c24f5b7e91afe3a14b37afdd5889b1072540092081ca7f98e7e908041ad",
+      "ported_sha256": "36e50c24f5b7e91afe3a14b37afdd5889b1072540092081ca7f98e7e908041ad"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/glm53_dflash.py",
+      "upstream_sha256": null,
+      "v914_sha256": "87587e4cd8da29ed808f02a03fe8f5171276c07617bfe48b377659c932667ffb",
+      "ported_sha256": "87587e4cd8da29ed808f02a03fe8f5171276c07617bfe48b377659c932667ffb"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/glm53_dflash_diagnostics.py",
+      "upstream_sha256": null,
+      "v914_sha256": "3f57fc9ebab8e15ffa29dacea70725887b5d7da1e850552c6d63810658482791",
+      "ported_sha256": "3f57fc9ebab8e15ffa29dacea70725887b5d7da1e850552c6d63810658482791"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/glm53_draft_layout.py",
+      "upstream_sha256": null,
+      "v914_sha256": "a6f24d2deb65c6077a3fb8057d9a29f6054126efe9018755b799278d5a85a1f3",
+      "ported_sha256": "a6f24d2deb65c6077a3fb8057d9a29f6054126efe9018755b799278d5a85a1f3"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/glm53_hicache.py",
+      "upstream_sha256": null,
+      "v914_sha256": "cecd8e6bc642732c2dffbd13c38761047436a686087b18a20749ef0cf28b1fdf",
+      "ported_sha256": "cecd8e6bc642732c2dffbd13c38761047436a686087b18a20749ef0cf28b1fdf"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/interleave.py",
+      "upstream_sha256": "7f1974e9bd4703e2afaa945dee5c74efac3cc7bbbb0d4b406b8425687684b1ea",
+      "v914_sha256": "54f6c5f670d4f9d90da8bad5a170c19cda839016775fe921c83a5a13fed3e69b",
+      "ported_sha256": "eb27f0913c2a27d398a7722b3775aed54f80c9c139fb4a75783f51f462b2b9b1"
+    },
+    {
+      "path": "python/sglang/srt/layers/dcp/comm.py",
+      "upstream_sha256": "7da7fe845e23207f2e616ee40bcad645fcba2432b00aa449169687d9041fc670",
+      "v914_sha256": "b770bd4502f16c283d16f3e6ce5f23246a14b7a56288e381fc53027d19b8bc4c",
+      "ported_sha256": "1ad59896f8e27cb6519e3348a316cd808fa466ee306364d65a10d6ce0106539b"
+    },
+    {
+      "path": "python/sglang/srt/layers/dcp/metadata.py",
+      "upstream_sha256": "64d83b24672768d497f9fb2eec174ded2e23477a0b0230d375166a1214c91e80",
+      "v914_sha256": "000668960b14c6ba6c5f99ef5040d07fcb6e4133995e815ce053e45724f1b552",
+      "ported_sha256": "de378312b1639d5c4a39b64b88398bd549cc08de7e2eb27947138b435924c980"
+    },
+    {
+      "path": "python/sglang/srt/layers/dcp/planner.py",
+      "upstream_sha256": "a8ea5095ff11010d9f45f5e3e7a02b3c8646b0d10c31505d9cc60ba27401ac3e",
+      "v914_sha256": "bfa2eaa974fb9d0ff33ee872520db149fb361e6f53631bb5efd7ed7526de924d",
+      "ported_sha256": "f6491659fbdee114d494c9f8fdb6b0d7d42fc0542a60694a9ecce8f1b537a882"
+    },
+    {
+      "path": "python/sglang/srt/layers/moe/moe_runner/humming.py",
+      "upstream_sha256": "da8b5d99a6a07205e6ca8318821ea5e2938914288bacd8d3adbbdf0fee043a04",
+      "v914_sha256": "0d7610bfb55195678ac9ca7ad34848b50ae4540e1c4f06c095b9a84045d0cacf",
+      "ported_sha256": "0d7610bfb55195678ac9ca7ad34848b50ae4540e1c4f06c095b9a84045d0cacf"
+    },
+    {
+      "path": "python/sglang/srt/layers/quantization/w4afp8.py",
+      "upstream_sha256": "21e9c527c9b83e350cdc35ce2bc62891cda1550934b2a5d302f0f807f752f125",
+      "v914_sha256": "b4fcef4ff0e2e37d3c54ef1671945deb2ca3e31ad49ea6c8cdb062c4b5484d7d",
+      "ported_sha256": "b4fcef4ff0e2e37d3c54ef1671945deb2ca3e31ad49ea6c8cdb062c4b5484d7d"
+    },
+    {
+      "path": "python/sglang/srt/layers/quantization/w4afp8_humming.py",
+      "upstream_sha256": null,
+      "v914_sha256": "b1e6f7b4bbc021a64279a5a4074e08f441c32439bf450c9db105d8b2151cc148",
+      "ported_sha256": "b1e6f7b4bbc021a64279a5a4074e08f441c32439bf450c9db105d8b2151cc148"
+    },
+    {
+      "path": "python/sglang/srt/managers/cache_controller.py",
+      "upstream_sha256": "afa835782488275925a809e238cfa012eb8985afb6fa74d6ef8b9d81e48f9cce",
+      "v914_sha256": "1596bcf46667bf82f86ed86036592ec22e4c4c4b249b9239ec2128f145fc51d8",
+      "ported_sha256": "e81e1e94375e3c4b5a6a57799c6e827542cbcbd519e3cda2a4c0c4cf12b5ac9d"
+    },
+    {
+      "path": "python/sglang/srt/managers/scheduler.py",
+      "upstream_sha256": "439ee96dd785fbb63a9f139b192cec984c252df16a573a436877f0ef9a4ca045",
+      "v914_sha256": "ceff10e9aea84461d315ef55729f29d9203a8a1f53a666b12b4c0109c7997ec8",
+      "ported_sha256": "d45845b4867823a91a23d3e6ce66852199e94da7777aae5dab910fa53d02496f"
+    },
+    {
+      "path": "python/sglang/srt/managers/tokenizer_manager.py",
+      "upstream_sha256": "952fdfcf54b13af6851993d4b7599d4b1efeb6aa630a7554584a1a047eda94f2",
+      "v914_sha256": "37c8428af4db393fa8aa4bf10682b41b66bcf4bfe3acfb7ece9b6619d9a39a29",
+      "ported_sha256": "7aebfc3d5b00765f394591e7986b626f7dd47e43ae14887afb43687ec979e906"
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/glm53_bounded_draft.py",
+      "upstream_sha256": null,
+      "v914_sha256": "391a9c902b1c7ebdc94e54191fb0f97268a170b5bfb46bbfe52b6d25f32aa247",
+      "ported_sha256": "391a9c902b1c7ebdc94e54191fb0f97268a170b5bfb46bbfe52b6d25f32aa247"
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/hybrid_cache/hybrid_pool_assembler.py",
+      "upstream_sha256": "c2f10674b65628a0d404cb68cc42f110d8eb6f5f60c18d36f0963ec81d6881de",
+      "v914_sha256": "16bd9d3981fb4985cfff929eff40396f210636f0c06edca769a4e9488cc9125f",
+      "ported_sha256": "c5f78d26a9caecbeef2ea4e5f3e806df6dd1beed22ec007972c5318f8fd4005d"
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/kv_cache_configurator.py",
+      "upstream_sha256": "691bef2acb4a9dfbc815bac5d130723b1b0ec8b9cb45fd751d586b17a1b633a6",
+      "v914_sha256": "3d4c9f4f7299e45445f8658502154a4cbb61ef5ee7388af3603c7757ac078b6b",
+      "ported_sha256": "48e159c8b4e6c86d69d3ef5c73a5dbd474306a92d37e21b06203d043124bff9f"
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/memory_pool.py",
+      "upstream_sha256": "737ac340aee5a1d2a260fdf976c9023c563ca550ca1e2d47a3bbcfb674915577",
+      "v914_sha256": "2b1d8d3e551ff1477ea6daf8b857c5b9f9a3348df223c9d68d0f3c0d1fe954f0",
+      "ported_sha256": "8e104c4a547e91c9f7a4f049e90da7b9c50b476486f5b1f5d5cbbd435b769093"
+    },
+    {
+      "path": "python/sglang/srt/mem_cache/pool_host/dsa.py",
+      "upstream_sha256": "9f043c2889a39901842a45856a4e1c14712fd5092a103e0dcabd4f085cee4729",
+      "v914_sha256": "56e157326e8f6b92079fb2ea5c587670ce02c5e9708201bcfe29bf7829c8955c",
+      "ported_sha256": "e18804877a12523e599875d74c2d024c5cf83194d2841801608f93c150c925cd"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/pool_configurator.py",
+      "upstream_sha256": "0d5c9ac48c15c95e63247306b0d9d220e9f2b9dd60b4f76472a690eb701eed21",
+      "v914_sha256": "bb65d9ee08de9e8e81bf548a817e9261747e38929f2bd21bc76c39123daa156e",
+      "ported_sha256": "b12e8e90d54b28c3807b7fd2f319013eb2aba6643dc0720448bd1fec69735eab"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py",
+      "upstream_sha256": "1c0d80d7c4df88f696dbdbfdbd1c79a3e7c1f06a294bce0dbd3f19639ed15a26",
+      "v914_sha256": "d39ac266dae936561dc3d42b7f52f7308ebc4a89ea01ce760615670f67528bde",
+      "ported_sha256": "5fe88339cd16ae0ea2f1842f6d7506b44b6323c49e784edf84103eefd232c691"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/runner_backend_utils/breakable_cuda_graph/breakable_cuda_graph.py",
+      "upstream_sha256": "691ba9a61ed9e1f1bb154d3e87e05b87570ab890e315240dc3b6166751e40cca",
+      "v914_sha256": "b6a2b7d6445a07471e471cec0f2f68aef1e5520f4247abea97f665271b68a7c8",
+      "ported_sha256": "9ac6e727bead1dc2e7c2c724e5519c23037ce6c60d872da15546f0d8278dde79"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/runner_backend_utils/breakable_cuda_graph/context.py",
+      "upstream_sha256": "f7cf9d819d872d4c0d3c0201ba9853939e4509ac8309445ba9f75aefa6525729",
+      "v914_sha256": "ea967f3230c89819471b19b0a9db35fc20e15c46b16687005d1e24afaf9378f7",
+      "ported_sha256": "ea967f3230c89819471b19b0a9db35fc20e15c46b16687005d1e24afaf9378f7"
+    },
+    {
+      "path": "python/sglang/srt/models/deepseek_common/attention_forward_methods/forward_mla.py",
+      "upstream_sha256": "8d0a74b2729a4636b268528c2f1944521381556d7b9ebc605b2f151fcf1cc554",
+      "v914_sha256": "cf6c9b7407dbf44d244120a1f26e63ef669ed3e5d5691c2b2580a71fb4f09b3d",
+      "ported_sha256": "c9a478ce53d77b9d8905b035661263f15a42e84075f29b4b80c8ac5e33988049"
+    },
+    {
+      "path": "python/sglang/srt/models/deepseek_v2.py",
+      "upstream_sha256": "1578dd16dd71b78b95d4a5625f22a152fbdb6822ac6b38a4f24d106464c2831f",
+      "v914_sha256": "58f70a1a520408c516b0bae54a8cae5d65fb335e5d61cde37a82ba511f39d621",
+      "ported_sha256": "00e99a98f352550b2d4a67cc1074ddc9a5e5e14b36066019abd4c64dab057a36"
+    },
+    {
+      "path": "python/sglang/srt/speculative/dflash_utils.py",
+      "upstream_sha256": "fcb7bdb17a9fbcd25c94081454d11a779699de9c773dbc70d56c76cac1960fc5",
+      "v914_sha256": "0ed9fdbabd019d0c615bde58f5fb316a49515748ad484941d2bf4f1fb29d9e25",
+      "ported_sha256": "9760208d845678182e326b3ce007398ae0e1778d23ba07dd2d23aaccfb33a3ea"
+    },
+    {
+      "path": "python/sglang/srt/speculative/dflash_worker_v2.py",
+      "upstream_sha256": "a157ea22c9ddab6a735e589c547ecc9b55e06b35f6cd6253495965a0f52ab969",
+      "v914_sha256": "42e193904f03676a883701e34847a12c27a2658f3820087164353a51a896a04b",
+      "ported_sha256": "0224651aae4434b4c03eb242e4d4100ae90c081e312113a8661d56aa25063aea"
+    }
+  ]
+}

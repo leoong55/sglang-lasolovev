@@ -104,12 +104,31 @@ logger = logging.getLogger(__name__)
 
 def _should_elide_dsa_index_k(*, is_draft_worker: bool) -> bool:
     memory_config = get_memory()
+    if (
+        memory_config.enable_hisparse
+        or memory_config.enable_unified_cache_external_linker
+        or is_draft_worker
+        or get_disagg().disaggregation_mode != "null"
+    ):
+        return False
+    if not memory_config.enable_hierarchical_cache:
+        return True
+
+    # Both the GPU allocator and its sizing code call this predicate. Enable
+    # sparse index storage only with the HiCache path whose packed host-layer
+    # mapping preserves logical layer completion and replicated DCP index pages.
+    if not envs.SGLANG_GLM53_HICACHE_INDEX_ELISION.get():
+        return False
+    parallel = get_parallel()
     return (
-        not memory_config.enable_hisparse
-        and not is_draft_worker
-        and not memory_config.enable_hierarchical_cache
-        and not memory_config.enable_unified_cache_external_linker
-        and get_disagg().disaggregation_mode == "null"
+        memory_config.hicache_io_backend == "direct"
+        and memory_config.hicache_mem_layout == "layer_first"
+        and memory_config.hicache_write_policy == "write_through"
+        and memory_config.hicache_host_memory_mode == "cache"
+        and memory_config.hicache_storage_backend is None
+        and parallel.attn_cp_size == 8
+        and parallel.attn_dcp_size == 4
+        and not parallel.enable_dsa_cache_layer_split
     )
 
 
@@ -1387,7 +1406,9 @@ class KVCacheConfigurator:
         PoolCls = current_platform.get_dsa_kv_pool_cls()
         token_to_kv_pool = PoolCls(
             max_total_num_tokens,
-            page_size=self.pool_page_size,
+            # DSA kernels keep the physical page size even when a replicated
+            # DCP draft uses a wider virtual location space.
+            page_size=get_schedule().page_size,
             dtype=self.kv_cache_dtype,
             kv_lora_rank=self.model_config.kv_lora_rank,
             qk_rope_head_dim=self.model_config.qk_rope_head_dim,
@@ -1620,7 +1641,9 @@ class KVCacheConfigurator:
             ]
         token_to_kv_pool = PoolCls(
             max_total_num_tokens,
-            page_size=self.pool_page_size,
+            # DSA kernels keep the physical page size even when a replicated
+            # DCP draft uses a wider virtual location space.
+            page_size=get_schedule().page_size,
             dtype=self.kv_cache_dtype,
             kv_lora_rank=self.model_config.kv_lora_rank,
             qk_rope_head_dim=self.model_config.qk_rope_head_dim,
@@ -1947,6 +1970,9 @@ class KVCacheConfigurator:
     def _build_mha_kv_pool(
         self, *, max_total_num_tokens: int, mha_pool_class: type, quant_method=None
     ) -> KVCache:
+        import os
+        bounded = (os.environ.get("SGLANG_GLM53_DRAFT_CACHE_WINDOW") == "2048"
+                   and self.is_draft_worker and self.spec_algorithm.is_dflash_family())
         if self.kv_cache_dtype_str == "mxfp8":
             pool_cls = MHATokenToKVPoolMXFP8
         else:
@@ -1956,17 +1982,47 @@ class KVCacheConfigurator:
                 else mha_pool_class
             )
         pool_kwargs = {}
+        if bounded:
+            from sglang.srt.mem_cache.glm53_bounded_draft import GLM53BoundedDraftPool
+            cfg = self.model_config.hf_config
+            if (getattr(cfg, "sliding_window", None) != 2048
+                    or getattr(cfg, "layer_types", None) != ["sliding_attention"] * 6
+                    or get_parallel().tp_size != 8 or get_parallel().attn_dcp_size != 4):
+                raise ValueError("Bounded draft requires full GLM53 DFlash2, six window2048 layers, TP8/DCP4")
+            if quant_method is not None:
+                raise ValueError("Bounded draft requires the unquantized BF16 pool")
+            pool_cls = GLM53BoundedDraftPool
+            pool_kwargs["max_requests"] = get_schedule().max_running_requests
         if quant_method is not None:
             pool_kwargs["quant_method"] = quant_method
         else:
             pool_kwargs["post_capture_active"] = self.post_capture_kv_active
+        parallel = get_parallel()
+        from sglang.srt.layers.cp.glm53_dflash import supports_dflash_dcp
+
+        if self.is_draft_worker and supports_dflash_dcp(self.server_args):
+            # DFlashAttention and its FA backend shard heads over the full TP
+            # group. Target prefill CP may reduce attn_tp_size to one; using
+            # that group here overallocates heads and disagrees with the draft
+            # budget. DCP still widens the token/page space independently.
+            head_num = self.model_config.get_num_kv_heads(parallel.tp_size)
+            logger.info(
+                "DFLASH KV pool: heads=%d, tokens=%d, page_size=%d, layers=%d, dtype=%s",
+                head_num,
+                max_total_num_tokens,
+                self.pool_page_size,
+                self.layer_info.num_effective_layers,
+                self.kv_cache_dtype,
+            )
+        else:
+            head_num = self.model_config.get_num_kv_heads(
+                parallel.attn_tp_size, parallel.attn_dcp_size
+            )
         token_to_kv_pool = pool_cls(
             max_total_num_tokens,
             page_size=self.pool_page_size,
             dtype=self.kv_cache_dtype,
-            head_num=self.model_config.get_num_kv_heads(
-                get_parallel().attn_tp_size, get_parallel().attn_dcp_size
-            ),
+            head_num=head_num,
             head_dim=self.model_config.head_dim,
             v_head_dim=self.model_config.v_head_dim,
             layer_num=self.layer_info.num_effective_layers,
