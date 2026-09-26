@@ -1,0 +1,17 @@
+{
+  "status": "component_reference_gates_passed",
+  "source": "fe1dcba13",
+  "unique_cases": 36,
+  "ranks": 8,
+  "layouts_per_case": 2,
+  "all_graph_eager_checks_passed": true,
+  "max_local_reference_l2": 0.048313338309526443,
+  "max_ep8_reference_l2": 0.04598803445696831,
+  "max_cross_layout_fp32_sum_l2": 0.0023677756544202566,
+  "max_cross_layout_bf16_sum_l2": 0.0048753065057098866,
+  "cross_layout_strict_pass": 24,
+  "cross_layout_cases": 288,
+  "full_model_numerical_parity": false,
+  "archive_sha256_verified": true,
+  "files_verified": 14
+}

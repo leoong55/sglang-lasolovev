@@ -35,3 +35,20 @@ and13files verified bySHA256. Implementation references:
 [Humming BF16 epilogue](https://github.com/inclusionAI/humming/blob/main/humming/include/humming/epilogue/gmem_writer.cuh),
 [Humming kernel constraints](https://github.com/inclusionAI/humming/blob/main/humming/kernel/humming.py).
 The local diagnostic uses pinned0.1.12 sources; upstream main can change.
+
+
+The three-layer gate completed on sourcefe1dcba13:36cases ×8ranks, two layouts.
+Every graph/eager and FP32-reference gate passed unchanged; maximum local
+referenceL2=0.048313 and EP8referenceL2=0.045988. The archive and14files are
+SHA256 verified. Cross-layout strict parity did not pass for nonzero cases:
+maximumL2=0.002368 with FP32 EP summation and0.004875 with BF16 summation.
+These smaller residual differences do not establish full-model equivalence.
+
+The prepared serving pair uses the same sourcefe1dcba13, fixed expert placement,
+padding repair, CP8/DCP4/EP8, full DFlash, HiCache64 and KV600000. P9control
+retains Stream-K; P10candidate disables it. Only that compute switch differs.
+P9 is explicitly a known-nondeterministic experimental control, supported by
+its64 native FP32-reference diagnostic points within the unchanged bound; its
+failed repeatability gate is not relabeled passed. The startup evidence records
+that distinction. Neither arm is a production-approved profile. P9 serving
+has been created; P10 is prepared only, with no performance measurements yet.
