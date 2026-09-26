@@ -140,3 +140,15 @@ rtol0.001/atol0.002 graph-eager иrelativeL2<=0.08 кFP32 из
 `check_w4_humming_gpu.py`. Отдельно записываетсястрогаяcross-layoutпроверка;
 её неуспех не скрывается расширением tolerances. Это компонентный gate,
 не полный quality-проход и не serving-базовый тест.
+
+
+### Постоянный поток: почему быстрее prefill не равен лучшему TTFT
+
+Финальные request metadata показывают P6buckets→P8: short nativequeuep95
+0.692→0.764s, prefill elapsedp950.712→0.620s. Short draftacceptance
+41.6→39.3%, long38.2→27.9%;longderiveddecodeinterval0.092→0.102s.
+Это сопутствующие механизмы небольшой регрессии constant относительноP6buckets.
+Причину измененияacceptance ещё нельзя однозначно приписать арифметике
+или изменившимся batch/scheduling: обе гипотезы требуют отдельной изоляции.
+Не вычитать квантили и не выдаватьprefillelapsedзаGPUcompute.
+См.native-request-comparison.json,analyze_request_native.py.
