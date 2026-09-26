@@ -1,7 +1,9 @@
+import ast
 import importlib.util
 import os
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -11,6 +13,23 @@ spec.loader.exec_module(diag)
 
 
 class DiagnosticsTest(unittest.TestCase):
+    def test_scheduler_configures_diagnostics_from_parallel_state(self):
+        # Execute the actual startup call with 0.5.20's scheduler shape: ranks
+        # live only in ParallelState, not as attributes on Scheduler itself.
+        tree = ast.parse((ROOT / "python/sglang/srt/managers/scheduler.py").read_text())
+        method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                      and n.name == "_get_new_batch_prefill_raw")
+        call = next(n for n in method.body if isinstance(n, ast.Expr)
+                    and isinstance(n.value, ast.Call)
+                    and ast.unparse(n.value.func) == "diag.configure")
+        code = compile(ast.Module(body=[call], type_ignores=[]), "scheduler.py", "exec")
+        for tp, pp, export in [(0, 0, True), (7, 0, False), (0, 1, False)]:
+            with self.subTest(tp=tp, pp=pp):
+                probe = Mock()
+                scheduler = SimpleNamespace(ps=SimpleNamespace(tp_rank=tp, pp_rank=pp))
+                exec(code, {"self": scheduler, "diag": probe})
+                probe.configure.assert_called_once_with(rank=tp, export=export)
+
     def tearDown(self):
         diag._pending.clear()
         diag.configure(rank=0, export=False)

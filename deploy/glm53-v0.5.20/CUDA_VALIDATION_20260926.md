@@ -46,3 +46,21 @@ skipped. The user was asked to free host RAM or authorize one reduced HiCache
 capacity consistently across all compared profiles; no memory guard was bypassed.
 Six closed-attempt artifacts were exported with remote SHA256 verification;
 preflight and the first attempt contribute another fourteen verified artifacts.
+
+## Third attempt: user-authorized HiCache64
+
+The target MLA (64.00 GB/rank), DSA indexer (13.87 GB/rank), and full DFlash
+host pool (15.37 GB/rank) allocated successfully. The previous arithmetic
+excluded this separate DFlash host pool; the total host pools at HiCache64
+are about 746 GB across eight ranks, not 623 GB. At HiCache96 the estimate
+including the proportional draft pool is about 1119 GB, not 934 GB.
+
+After allocation, the first scheduler loop failed in P0 diagnostics: the
+0.5.20 scheduler keeps ranks in `self.ps`, while the hook read the removed
+`self.tp_rank` and `self.pp_rank`. The hook now reads ParallelState. A CPU
+regression executes the actual call with only `ps` present, checking rank zero,
+a nonzero TP rank and a nonzero PP rank. No benchmark request ran in r3.
+
+The user also authorized further HiCache reductions if needed. Every compared
+profile must use the same final host capacity. GPU KV remains capped at 600000
+physical / 2400000 logical tokens.

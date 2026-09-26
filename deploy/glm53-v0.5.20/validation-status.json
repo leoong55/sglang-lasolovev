@@ -2,8 +2,8 @@
   "date": "2026-09-26",
   "base_commit": "fcd40b5f1ac133afaf4cd1aba8f63d3d4c9af57a",
   "cpu": {
-    "passed": 56,
-    "subtests_passed": 20,
+    "passed": 57,
+    "subtests_passed": 23,
     "command": "python -m pytest -q deploy/glm53-v0.5.20/tests",
     "python": "3.11.7",
     "torch": "2.14.0",
@@ -33,6 +33,17 @@
   "validated_gpu_profile": null,
   "source_tested": "93a6150ed",
   "server_startup": {
+    "status": "r3_failed_before_readiness_on_diagnostics_rank_field",
+    "hicache_size_GB_per_rank": 64,
+    "host_allocations": "target MLA, indexer and full draft succeeded",
+    "host_pool_GB_per_rank": {
+      "target": 64,
+      "indexer": 13.87,
+      "draft": 15.37
+    },
+    "fix": "Scheduler.ps.tp_rank and ps.pp_rank; CPU checked, GPU startup retest pending"
+  },
+  "server_startup_previous_hicache96": {
     "status": "blocked_host_ram_before_readiness",
     "prefill_capture": "passed",
     "target_verify_capture": "passed",

@@ -3772,7 +3772,10 @@ class Scheduler(
     ) -> Tuple[Optional[ScheduleBatch], ScheduleBatch]:
         from sglang.srt.observability import glm53_prefill as diag
 
-        diag.configure(rank=self.tp_rank, export=self.tp_rank == 0 and self.pp_rank == 0)
+        diag.configure(
+            rank=self.ps.tp_rank,
+            export=self.ps.tp_rank == 0 and self.ps.pp_rank == 0,
+        )
         if diag.enabled():
             diag.poll()
         # Check if the grammar is ready in the grammar queue

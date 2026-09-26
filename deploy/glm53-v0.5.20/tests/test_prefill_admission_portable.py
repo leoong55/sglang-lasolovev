@@ -58,7 +58,7 @@ class AdmissionTest(unittest.TestCase):
     def test_stale_full_flag_reaches_current_capacity_check(self):
         fn = method("python/sglang/srt/managers/scheduler.py", "Scheduler", "_get_new_batch_prefill_raw", {})
         capacity = Mock(return_value=0)
-        scheduler = SimpleNamespace(tp_rank=0, pp_rank=0, grammar_manager=SimpleNamespace(has_waiting_grammars=lambda: False),
+        scheduler = SimpleNamespace(ps=SimpleNamespace(tp_rank=0, pp_rank=0), grammar_manager=SimpleNamespace(has_waiting_grammars=lambda: False),
             enable_priority_preemption=False, is_hybrid_swa=False, prefill_interleaving=True,
             waiting_queue=[object()], chunked_req=None, min_free_slots_delayer=None,
             get_num_allocatable_reqs=capacity)
