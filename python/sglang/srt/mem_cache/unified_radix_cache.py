@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import atexit
 import logging
 import threading
@@ -3060,6 +3062,7 @@ class UnifiedRadixCache(BasePrefixCache):
             ready_count += 1
         return ready_count
 
+    @_prefill_traced("hicache_consensus", cuda=False)
     def _sync_hicache_ready_counts(
         self,
     ) -> tuple[int, int, tuple[int, ...], tuple[PoolName, ...]]:

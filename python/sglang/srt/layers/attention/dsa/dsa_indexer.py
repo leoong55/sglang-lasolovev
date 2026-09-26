@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
@@ -1052,6 +1054,7 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
         need_chunk = logits_bytes > logits_budget_bytes
         return need_chunk, logits_budget_bytes
 
+    @_prefill_traced("indexer", cuda=True)
     def _get_topk_ragged(
         self,
         enable_dual_stream: bool,
@@ -1197,6 +1200,9 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
         bytes_per_row = k_offset * self._MQA_LOGITS_BYTES_PER_ELEM
         max_rows = max(1, int(logits_budget_bytes // max(bytes_per_row, 1)))
         max_rows = min(max_rows, q_offset)
+        from sglang.srt.observability.glm53_prefill import record
+        record("indexer", q_rows=q_offset, kv_rows=k_offset, workspace_bytes=logits_budget_bytes,
+               rows_per_launch=max_rows, launches=(q_offset + max_rows - 1) // max_rows)
 
         global_topk_offset = metadata.attn_metadata.topk_indices_offset
         cu_seqlens_q_full = None

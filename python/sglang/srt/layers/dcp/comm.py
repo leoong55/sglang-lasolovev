@@ -20,6 +20,8 @@ PR #25090 vs #14194):
   - cp_lse_ag_out_rs_mla: Triton (log2/exp2) correction / reduce-scatter
 """
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import warnings
 from typing import Optional
 
@@ -327,6 +329,7 @@ def _gather_packed_prefix_with_plan(
     )
 
 
+@_prefill_traced("dcp_gather", cuda=True)
 def all_gather_kv_cache_for_mla_extend(
     token_to_kv_pool,
     attn_mqa,

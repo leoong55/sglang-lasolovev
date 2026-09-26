@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import json
 import logging
 import math
@@ -472,6 +474,7 @@ class HummingRunnerCore(MoeRunnerCore):
             sublayer_name="w2",
         )
 
+    @_prefill_traced("moe")
     def run(
         self,
         runner_input: HummingRunnerInput,

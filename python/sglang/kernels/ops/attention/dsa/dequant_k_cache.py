@@ -1,5 +1,7 @@
 from typing import Optional
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import torch
 import triton
 import triton.language as tl
@@ -294,6 +296,7 @@ def _dequantize_k_cache_paged_kernel(
 _GATHER_TOKENS_PER_PROG = 4
 
 
+@_prefill_traced("kv_convert")
 def gather_dequant_requant_fp8_paged(
     quant_k_cache: torch.Tensor,
     page_table_1_flattened: torch.Tensor,

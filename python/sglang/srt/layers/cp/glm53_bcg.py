@@ -82,7 +82,7 @@ def exact_replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size
     return num_tokens if num_tokens in capture_num_tokens else None
 
 
-def replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size=8,
+def _replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size=8,
                   max_padding_factor=1.25):
     """Pad only physical CP rows; request lengths and KV locations stay live.
 
@@ -208,3 +208,10 @@ def _attention_eager(
             )
         finally:
             attn_context.clear_attn_inputs()
+
+
+def replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size=8, max_padding_factor=1.25):
+    bucket = _replay_bucket(num_tokens, extend_seq_lens, capture_num_tokens, cp_size, max_padding_factor)
+    from sglang.srt.observability.glm53_prefill import record
+    record("graph_selection", new_tokens=num_tokens, bucket=bucket, mode="graph" if bucket else "eager")
+    return bucket

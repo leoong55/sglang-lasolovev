@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import logging
 from dataclasses import dataclass
 from typing import (
@@ -2773,6 +2775,7 @@ class DeepseekSparseAttnBackend(
             layer_id=layer.layer_id,
         )
 
+    @_prefill_traced("attention", cuda=True)
     def _forward_flashmla_sparse_q8kv8(
         self,
         q_nope: torch.Tensor,

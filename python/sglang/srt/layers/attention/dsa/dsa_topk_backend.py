@@ -3,6 +3,8 @@ from __future__ import annotations
 from enum import Enum, IntEnum, auto
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import torch
 
 from sglang.srt.environ import envs
@@ -90,6 +92,7 @@ class DSATopKBackend(Enum):
             )
         raise RuntimeError(f"Unsupported {self = }.")
 
+    @_prefill_traced("topk", cuda=True)
     def topk_transform(
         self,
         logits: torch.Tensor,

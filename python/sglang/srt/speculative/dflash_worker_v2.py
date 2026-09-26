@@ -1,4 +1,6 @@
 import logging
+from sglang.srt.observability.glm53_prefill import traced as _prefill_traced
+
 import math
 import os
 from dataclasses import replace
@@ -1730,6 +1732,7 @@ class DFlashWorkerV2(BaseSpecWorker):
 
         return out_tokens
 
+    @_prefill_traced("draft_append")
     def _append_target_hidden_to_draft_kv_by_loc(
         self,
         *,

@@ -3765,6 +3765,11 @@ class Scheduler(
         prefill_delayer_single_pass: Optional[PrefillDelayerSinglePassExecutor],
         running_batch: ScheduleBatch,
     ) -> Tuple[Optional[ScheduleBatch], ScheduleBatch]:
+        from sglang.srt.observability import glm53_prefill as diag
+
+        diag.configure(rank=self.tp_rank, export=self.tp_rank == 0 and self.pp_rank == 0)
+        if diag.enabled():
+            diag.poll()
         # Check if the grammar is ready in the grammar queue
         if self.grammar_manager.has_waiting_grammars():
             ready_grammar_requests = self.grammar_manager.get_ready_grammar_requests()
@@ -3778,6 +3783,8 @@ class Scheduler(
         if (
             running_batch.batch_is_full or len(self.waiting_queue) == 0
         ) and self.chunked_req is None:
+            if self.waiting_queue:
+                diag.reject("batch_full")
             return None, running_batch
 
         running_bs = len(running_batch.reqs)
@@ -3792,6 +3799,7 @@ class Scheduler(
                 ),
             )
         ):
+            diag.reject("delayer")
             return None, running_batch
 
         # Ignore the check if self.chunked_req is not None.
@@ -3805,6 +3813,7 @@ class Scheduler(
             and not self.enable_priority_preemption
         ):
             running_batch.batch_is_full = True
+            diag.reject("request_slots")
             return None, running_batch
 
         # Get priority queue
@@ -3855,6 +3864,7 @@ class Scheduler(
             prefill_tile_block_m=prefill_tile_block_m,
         )
 
+        continuing_req = self.chunked_req
         if self.chunked_req is not None:
             self.chunked_req.init_next_round_input()
             self.chunked_req = adder.add_chunked_req(self.chunked_req)
@@ -3943,6 +3953,10 @@ class Scheduler(
                 running_loras.add(req.lora_id)
 
             if res != AddReqResult.CONTINUE:
+                if req not in adder.can_run_list:
+                    diag.reject("kv_capacity" if res == AddReqResult.NO_TOKEN else
+                                "token_budget" if adder.rem_chunk_tokens is not None and adder.rem_chunk_tokens <= 0 else
+                                "other")
                 if res == AddReqResult.NO_TOKEN:
                     if (
                         self.enable_hierarchical_cache
@@ -4021,6 +4035,11 @@ class Scheduler(
                 self.tree_cache.ready_to_load_host_cache()
             )
 
+        if diag.enabled():
+            diag.record("batch", new_tokens=sum(r.extend_range.length for r in can_run_list),
+                        prefix_tokens=sum(len(r.prefix_indices) for r in can_run_list),
+                        requests=len(can_run_list),
+                        continuation_tokens=continuing_req.extend_range.length if continuing_req in can_run_list else 0)
         new_batch.prepare_for_extend()
 
         if self.tp_worker.model_runner.prefill_aware_swa:
