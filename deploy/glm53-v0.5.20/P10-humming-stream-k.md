@@ -20,10 +20,9 @@ control path. The W4AFP8 layer opts in; unrelated Humming layers are unchanged.
 No shared default tuning dictionaries are mutated.
 
 Two CPU regressions execute the actual configuration method; one fails on the
-previous source and both pass with the change. The next check repeats the
-three-layer real-weight arithmetic gate with the unchanged rtol0.001/atol0.002
-and FP32-reference relativeL2<=0.08. Cross-layout strict parity is still recorded
-separately. No new serving result or full-model acceptance exists yet.
+previous source and both pass with the change. The three-layer real-weight gate completed with unchanged rtol0.001/atol0.002
+and FP32-reference relativeL2<=0.08, as detailed below. Cross-layout strict parity
+is recorded separately. P10 has no serving result or full-model acceptance yet.
 
 At16k, the diagnostic rank-max local MoE times fell4.9–6.5%; at2k they ranged
 from1.4% faster to3.3% slower. These are ten replays of one layer with synthetic
@@ -50,11 +49,11 @@ retains Stream-K; P10candidate disables it. Only that compute switch differs.
 P9 is explicitly a known-nondeterministic experimental control, supported by
 its64 native FP32-reference diagnostic points within the unchanged bound; its
 failed repeatability gate is not relabeled passed. The startup evidence records
-that distinction. Neither arm is a production-approved profile. P9 serving
-has been created; P10 is prepared only, with no performance measurements yet.
+that distinction. Neither arm is a production-approved profile. P9 completed627 performance requests and its matched-cache diagnostic;
+P10 has been created, with no P10 performance measurements yet.
 
 
-## Paired resident/host-cache diagnostic (prepared, not measured)
+## Paired resident/host-cache diagnostic
 
 After each P9/P10 performance run, `diagnostics/cache_matched_streamk_pair.py`
 repeats the previous 29-request matched-cache workload with the same seed.
@@ -71,4 +70,6 @@ scenarios, and saved exact nonce/natural stop before it may flush cache.
 Its prepared Job mounts only the results volume; the script refuses to overwrite
 existing evidence.
 These are sampled output comparisons, not full-logit equivalence or model
-quality validation. Neither paired cache Job has run at this revision.
+quality validation. P9 completed29 requests: resident repeats already differ
+before eviction (shared first-top20 logprob difference up to0.488), and host
+reload differs by0.197. P10 remains unmeasured at this revision.

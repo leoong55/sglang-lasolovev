@@ -1,0 +1,207 @@
+{
+  "attempt": "p9-padids-r1",
+  "requests": 627,
+  "errors": 0,
+  "scenarios": [
+    {
+      "run": "00-mixed-r1",
+      "scenario": "mixed",
+      "requests": 7,
+      "errors": 0,
+      "ttft_p50_s": 3.1034143469296396,
+      "ttft_p95_s": 6.895194944180546,
+      "e2e_p50_s": 9.518803167156875,
+      "decode_interval_mean_s": 0.023675346248117943,
+      "request_window_output_tps": 128.0568975013453
+    },
+    {
+      "run": "01-fresh-r1",
+      "scenario": "fresh",
+      "requests": 1,
+      "errors": 0,
+      "ttft_p50_s": 5.002202551113442,
+      "ttft_p95_s": 5.002202551113442,
+      "e2e_p50_s": 7.388010855996981,
+      "decode_interval_mean_s": 0.009356110999543293,
+      "request_window_output_tps": 34.650734140732915
+    },
+    {
+      "run": "02-constant-r1",
+      "scenario": "constant",
+      "requests": 81,
+      "errors": 0,
+      "ttft_p50_s": 0.9660337460227311,
+      "ttft_p95_s": 1.5067426948808134,
+      "e2e_p50_s": 17.126597790047526,
+      "decode_interval_mean_s": 0.06696983374675762,
+      "request_window_output_tps": 417.61124939219906
+    },
+    {
+      "run": "03-burst-r1",
+      "scenario": "burst",
+      "requests": 40,
+      "errors": 0,
+      "ttft_p50_s": 4.151813233969733,
+      "ttft_p95_s": 8.63876413553953,
+      "e2e_p50_s": 15.79196544305887,
+      "decode_interval_mean_s": 0.043042105570636396,
+      "request_window_output_tps": 488.4023721141763
+    },
+    {
+      "run": "04-repeated-r1",
+      "scenario": "repeated",
+      "requests": 80,
+      "errors": 0,
+      "ttft_p50_s": 2.5591026480542496,
+      "ttft_p95_s": 3.828397230571136,
+      "e2e_p50_s": 10.923107722075656,
+      "decode_interval_mean_s": 0.031987092853044435,
+      "request_window_output_tps": null
+    },
+    {
+      "run": "05-fresh-r2",
+      "scenario": "fresh",
+      "requests": 1,
+      "errors": 0,
+      "ttft_p50_s": 4.991923795081675,
+      "ttft_p95_s": 4.991923795081675,
+      "e2e_p50_s": 6.672606182983145,
+      "decode_interval_mean_s": 0.006590911325103804,
+      "request_window_output_tps": 38.36581883895165
+    },
+    {
+      "run": "06-mixed-r2",
+      "scenario": "mixed",
+      "requests": 7,
+      "errors": 0,
+      "ttft_p50_s": 2.5580786059144884,
+      "ttft_p95_s": 6.241522628674282,
+      "e2e_p50_s": 8.75058616604656,
+      "decode_interval_mean_s": 0.022149961274404193,
+      "request_window_output_tps": 176.16958183923214
+    },
+    {
+      "run": "07-constant-r2",
+      "scenario": "constant",
+      "requests": 81,
+      "errors": 0,
+      "ttft_p50_s": 0.9692163770087063,
+      "ttft_p95_s": 1.670375376008451,
+      "e2e_p50_s": 15.287853226996958,
+      "decode_interval_mean_s": 0.0641466629656365,
+      "request_window_output_tps": 425.0789782370773
+    },
+    {
+      "run": "08-burst-r2",
+      "scenario": "burst",
+      "requests": 40,
+      "errors": 0,
+      "ttft_p50_s": 4.416833459516056,
+      "ttft_p95_s": 8.870958128629718,
+      "e2e_p50_s": 16.034512537065893,
+      "decode_interval_mean_s": 0.04256349555193903,
+      "request_window_output_tps": 571.1409431296568
+    },
+    {
+      "run": "09-repeated-r2",
+      "scenario": "repeated",
+      "requests": 80,
+      "errors": 0,
+      "ttft_p50_s": 2.2437191646313295,
+      "ttft_p95_s": 3.420193126681261,
+      "e2e_p50_s": 10.552074820036069,
+      "decode_interval_mean_s": 0.03169100114498196,
+      "request_window_output_tps": null
+    },
+    {
+      "run": "10-fresh-r3",
+      "scenario": "fresh",
+      "requests": 1,
+      "errors": 0,
+      "ttft_p50_s": 5.064269738039002,
+      "ttft_p95_s": 5.064269738039002,
+      "e2e_p50_s": 7.153449616162106,
+      "decode_interval_mean_s": 0.00819286226714943,
+      "request_window_output_tps": 35.78692990604251
+    },
+    {
+      "run": "11-mixed-r3",
+      "scenario": "mixed",
+      "requests": 7,
+      "errors": 0,
+      "ttft_p50_s": 2.60341376112774,
+      "ttft_p95_s": 6.221217584982512,
+      "e2e_p50_s": 8.777221238007769,
+      "decode_interval_mean_s": 0.021218511014420238,
+      "request_window_output_tps": 176.53942506006575
+    },
+    {
+      "run": "12-constant-r3",
+      "scenario": "constant",
+      "requests": 81,
+      "errors": 0,
+      "ttft_p50_s": 0.7419891790486872,
+      "ttft_p95_s": 1.4589008630719036,
+      "e2e_p50_s": 14.815965841989964,
+      "decode_interval_mean_s": 0.06479730944165428,
+      "request_window_output_tps": 429.89385095056605
+    },
+    {
+      "run": "13-burst-r3",
+      "scenario": "burst",
+      "requests": 40,
+      "errors": 0,
+      "ttft_p50_s": 4.09959568514023,
+      "ttft_p95_s": 8.562884475826285,
+      "e2e_p50_s": 15.949278658954427,
+      "decode_interval_mean_s": 0.04237256557813061,
+      "request_window_output_tps": 586.9683578484874
+    },
+    {
+      "run": "14-repeated-r3",
+      "scenario": "repeated",
+      "requests": 80,
+      "errors": 0,
+      "ttft_p50_s": 2.6190227154875174,
+      "ttft_p95_s": 3.5043927227612586,
+      "e2e_p50_s": 10.712157896021381,
+      "decode_interval_mean_s": 0.030694009003026282,
+      "request_window_output_tps": null
+    }
+  ],
+  "gpu_memory_during_workload": {
+    "0": {
+      "sampled_min_free_MiB": 9707.0,
+      "sampled_max_used_MiB": 133450.0
+    },
+    "1": {
+      "sampled_min_free_MiB": 8649.0,
+      "sampled_max_used_MiB": 134508.0
+    },
+    "2": {
+      "sampled_min_free_MiB": 8647.0,
+      "sampled_max_used_MiB": 134510.0
+    },
+    "3": {
+      "sampled_min_free_MiB": 9127.0,
+      "sampled_max_used_MiB": 134030.0
+    },
+    "4": {
+      "sampled_min_free_MiB": 8745.0,
+      "sampled_max_used_MiB": 134412.0
+    },
+    "5": {
+      "sampled_min_free_MiB": 8649.0,
+      "sampled_max_used_MiB": 134508.0
+    },
+    "6": {
+      "sampled_min_free_MiB": 8649.0,
+      "sampled_max_used_MiB": 134508.0
+    },
+    "7": {
+      "sampled_min_free_MiB": 9609.0,
+      "sampled_max_used_MiB": 133548.0
+    }
+  },
+  "limits": "Sampled GPU memory at30s, not absolute peak. Decode interval is client-derived (E2E-TTFT)/(N-1), not precise token-level ITL. Repeated rounds have separate local clocks; combined throughput omitted."
+}

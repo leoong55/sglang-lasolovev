@@ -1,5 +1,5 @@
 {
-  "status": "partial; seven profiles measured; P8 fresh/mixed gain; numerical parity unresolved",
+  "status": "partial; 8 profiles measured; numerical parity unresolved",
   "profiles": [
     {
       "attempt": "p2-r4",
@@ -385,12 +385,67 @@
       "decode_interval_mean_s": 0.032709179745242914,
       "requests": 240,
       "errors": 0
+    },
+    {
+      "attempt": "p9-padids-r1",
+      "profile": "P9: padding",
+      "scenario": "fresh",
+      "ttft_p50_s": 5.002202551113442,
+      "ttft_p95_s": 5.002202551113442,
+      "e2e_p50_s": 7.153449616162106,
+      "decode_interval_mean_s": 0.00819286226714943,
+      "requests": 3,
+      "errors": 0
+    },
+    {
+      "attempt": "p9-padids-r1",
+      "profile": "P9: padding",
+      "scenario": "mixed",
+      "ttft_p50_s": 2.60341376112774,
+      "ttft_p95_s": 6.241522628674282,
+      "e2e_p50_s": 8.777221238007769,
+      "decode_interval_mean_s": 0.022149961274404193,
+      "requests": 21,
+      "errors": 0
+    },
+    {
+      "attempt": "p9-padids-r1",
+      "profile": "P9: padding",
+      "scenario": "constant",
+      "ttft_p50_s": 0.9660337460227311,
+      "ttft_p95_s": 1.5067426948808134,
+      "e2e_p50_s": 15.287853226996958,
+      "decode_interval_mean_s": 0.06479730944165428,
+      "requests": 243,
+      "errors": 0
+    },
+    {
+      "attempt": "p9-padids-r1",
+      "profile": "P9: padding",
+      "scenario": "burst",
+      "ttft_p50_s": 4.151813233969733,
+      "ttft_p95_s": 8.63876413553953,
+      "e2e_p50_s": 15.949278658954427,
+      "decode_interval_mean_s": 0.04256349555193903,
+      "requests": 120,
+      "errors": 0
+    },
+    {
+      "attempt": "p9-padids-r1",
+      "profile": "P9: padding",
+      "scenario": "repeated",
+      "ttft_p50_s": 2.5591026480542496,
+      "ttft_p95_s": 3.5043927227612586,
+      "e2e_p50_s": 10.712157896021381,
+      "decode_interval_mean_s": 0.03169100114498196,
+      "requests": 240,
+      "errors": 0
     }
   ],
   "source_commits": {
     "p2_to_p6": "4f440e4f5",
     "p8": "1b99488b8",
-    "p9_unmeasured": "0b3735e42"
+    "p9_p10": "fe1dcba13"
   },
   "baseline_run": false
 }
