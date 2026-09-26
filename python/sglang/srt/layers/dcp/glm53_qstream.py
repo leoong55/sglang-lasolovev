@@ -4,7 +4,6 @@ No persistent KV values are cached here: each layer repacks its local shard once
 All loop bounds use CPU shapes, never device-dependent counts or collective skips.
 """
 from dataclasses import dataclass
-import math
 import torch
 
 SENTINEL = torch.iinfo(torch.int32).max
@@ -35,17 +34,28 @@ def prepare_layout(translator, batch):
     padded = torch.cat((torch.where(owned, wide, SENTINEL), wide.new_full((capacity,), SENTINEL)))
     selected = padded.sort().values[:capacity]
     physical = translator.translate_dcp_read_ids(torch.where(selected == SENTINEL, 0, selected)).int()
+    physical = torch.where(selected == SENTINEL, 0, physical)
     return LocalLayout(selected, physical)
 
 
 def compact_topk(widened, local_ids):
     """Search allocator IDs and stably compact only this shard's positions."""
+    if widened.is_cuda:
+        from sglang.kernels.ops.attention.dsa.glm53_qstream import compact_topk_cuda
+        return compact_topk_cuda(widened, local_ids)
     offsets = torch.searchsorted(local_ids, widened.contiguous()).clamp_max(local_ids.numel()-1)
     valid = (widened >= 0) & (widened != SENTINEL) & (local_ids[offsets] == widened)
     order = torch.argsort(valid.to(torch.int32), dim=-1, descending=True, stable=True)
     indices = torch.where(valid, offsets, -1).gather(-1, order).int().contiguous()
     lengths = valid.sum(-1, dtype=torch.int32)
     return indices, lengths
+
+
+def q8_lse_base2(lse, lengths):
+    # SM90 kernel.cuh stores logf(rL) + rM*LN2 (natural log), despite
+    # using exp2 internally; its empty-row sentinel is +inf. Normalize
+    # once at this boundary to the Q-stream contract: log2 and -inf.
+    return torch.where(lengths[:,None] == 0, -torch.inf, lse.float() * 1.4426950408889634)
 
 
 def correction_base2(partial, local_lse, all_lse):
@@ -79,23 +89,26 @@ class QStreamAttention:
 
     def tile(self, q, indices, kv, layout, scale):
         from sglang.kernels.ops.attention.sparse_mla_q8kv8_prefill_sm90 import sparse_mla_q8kv8_prefill_fwd
+        from sglang.srt.observability.glm53_prefill import stage
         group = self.group
         q_all = torch.empty((TILE*group.world_size, *q.shape[1:]), dtype=q.dtype, device=q.device)
         ids_all = indices.new_empty((TILE*group.world_size, indices.shape[1]))
         # NCCL sees FP8 Q as bytes; no unsupported FP8 reduction/transport type.
-        group.all_gather_into_tensor(q_all.view(torch.uint8), q.view(torch.uint8))
-        group.all_gather_into_tensor(ids_all, indices)
+        with stage("dcp_gather"):
+            group.all_gather_into_tensor(q_all.view(torch.uint8), q.view(torch.uint8))
+            group.all_gather_into_tensor(ids_all, indices)
         local, lengths = compact_topk(ids_all, layout.widened)
         out, _, lse = sparse_mla_q8kv8_prefill_fwd(
             q_all, kv, local.unsqueeze(1), scale, self.identity, self.identity,
             d_v=512, topk_length=lengths)
         empty = lengths == 0
-        lse = torch.where(empty[:,None], -torch.inf, lse.float())
+        lse = q8_lse_base2(lse,lengths)
         out = torch.where(empty[:,None,None], 0, out)
-        lses = group.all_gather(lse.contiguous(), dim=0).view(group.world_size, *lse.shape)
-        corrected = correction_base2(out, lse, lses)
-        # Queries are rank-major; every destination owns TILE tokens and ALL heads.
-        return group.reduce_scatter_along_dim(corrected.contiguous(), dim=0).to(out.dtype)
+        with stage("dcp_reduce"):
+            lses = group.all_gather(lse.contiguous(), dim=0).view(group.world_size, *lse.shape)
+            corrected = correction_base2(out, lse, lses)
+            # Queries are rank-major; every destination owns TILE tokens and ALL heads.
+            return group.reduce_scatter_along_dim(corrected.contiguous(), dim=0).to(out.dtype)
 
     def run(self, q, indices, packed_kv, layout, scale):
         from sglang.srt.observability.glm53_prefill import stage

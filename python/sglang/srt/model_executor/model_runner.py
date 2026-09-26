@@ -1105,6 +1105,8 @@ class ModelRunner:
         self.decode_cuda_graph_runner = capture.decode.runner
         self.graph_memory_usage = capture.memory_usage
         self.graph_time_usage = capture.time_usage
+        from sglang.srt.observability.glm53_runtime_profile import validate
+        validate(self)
 
     def init_routed_experts_capturer(self):
         if self.is_draft_worker:

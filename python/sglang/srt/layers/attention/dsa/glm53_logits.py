@@ -1,4 +1,4 @@
-"""SM90 DeepGEMM 0.1.7 allocation contract (FP32, 32 padded Q heads)."""
+"""SM90 DeepGEMM 0.2.0 allocation contract (FP32, 32 padded Q heads)."""
 
 
 def aligned(n, alignment):

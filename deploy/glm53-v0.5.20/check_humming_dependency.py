@@ -1,9 +1,16 @@
 """Check the pinned, already upstream-required dependency without a GPU."""
 
-from importlib.metadata import version
+from importlib.metadata import version, distribution
+import ast
 
 
 def main():
+    if version("sgl-deep-gemm") != "0.2.0":
+        raise RuntimeError("Expected sgl-deep-gemm==0.2.0 from the pinned 0.5.20 image")
+    source = distribution("sgl-deep-gemm").locate_file("deep_gemm/__init__.py").read_text()
+    if not any(isinstance(n,ast.FunctionDef) and n.name == "fp8_mqa_logits"
+               and "max_seqlen_k" in [a.arg for a in n.args.args] for n in ast.walk(ast.parse(source))):
+        raise RuntimeError("DeepGEMM compact logits API missing")
     found = version("humming-kernels")
     if found != "0.1.12":
         raise RuntimeError(

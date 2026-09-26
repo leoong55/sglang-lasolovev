@@ -34,7 +34,7 @@ def test_native_q8_partition_and_token_reduction(empty_rank,graph_on):
     if not dist.is_initialized():
         torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
         dist.init_process_group('nccl')
-    from sglang.srt.layers.dcp.glm53_qstream import QStreamAttention,LocalLayout,TILE,SENTINEL
+    from sglang.srt.layers.dcp.glm53_qstream import QStreamAttention,LocalLayout,TILE,SENTINEL,compact_topk
     from sglang.kernels.ops.attention.sparse_mla_q8kv8_prefill_sm90 import sparse_mla_q8kv8_prefill_fwd
     rank=dist.get_rank()
     torch.manual_seed(95)
@@ -52,6 +52,10 @@ def test_native_q8_partition_and_token_reduction(empty_rank,graph_on):
     indices=torch.full((TILE,2048),-1,device='cuda',dtype=torch.int32)
     indices[:,:257]=wide[None,:]
     indices[0].fill_(-1)
+    gpu_ids,gpu_lengths=compact_topk(indices,ids)
+    cpu_ids,cpu_lengths=compact_topk(indices.cpu(),ids.cpu())
+    torch.testing.assert_close(gpu_ids.cpu(),cpu_ids,atol=0,rtol=0)
+    torch.testing.assert_close(gpu_lengths.cpu(),cpu_lengths,atol=0,rtol=0)
     runner=QStreamAttention(Group());runner.identity=torch.ones(1,device='cuda')
     if graph_on:
         from sglang.srt.layers.dcp.glm53_qstream_graph import TileGraph

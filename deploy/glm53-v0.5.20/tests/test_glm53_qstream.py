@@ -22,6 +22,12 @@ class QStreamTest(unittest.TestCase):
         self.assertTrue((out == -1).all())
         self.assertTrue((lens == 0).all())
 
+    def test_native_natural_lse_is_normalized_and_empty_inf_removed(self):
+        native=torch.tensor([[0.,2.302585092994046],[float('inf'),float('inf')]])
+        result=m.q8_lse_base2(native,torch.tensor([3,0]))
+        torch.testing.assert_close(result[0],torch.tensor([0.,3.321928094887362]))
+        self.assertTrue(torch.isneginf(result[1]).all())
+
     def test_base2_reduction_matches_unsharded_softmax(self):
         torch.manual_seed(43)
         scores=torch.randn(7,3,31)*5

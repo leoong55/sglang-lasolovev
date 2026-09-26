@@ -1420,6 +1420,8 @@ class PrefillAdder:
                     )
                 )
                 if loaded is None:
+                    from sglang.srt.observability.glm53_prefill import reject
+                    reject("host_cache", rid=req.rid)
                     return AddReqResult.OTHER
                 new_indices, req.last_node = loaded
                 req.host_loaded_length = len(new_indices)

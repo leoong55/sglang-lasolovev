@@ -62,7 +62,22 @@ def check_profile(argv):
     p.add_argument("--hicache-mem-layout", choices=["layer_first"])
     p.add_argument("--hicache-io-backend", choices=["direct"])
     p.add_argument("--hicache-host-memory-mode", choices=["cache"])
+    p.add_argument("--glm53-dsa-indexer-mode",choices=["legacy","compact"],default="legacy")
+    p.add_argument("--glm53-dsa-logits-workspace-mib",type=int)
+    p.add_argument("--glm53-dcp-prefill-mode",choices=["kv-gather","q-stream"],default="kv-gather")
+    p.add_argument("--glm53-hicache-event-sync",choices=["sync","pipelined"],default="sync")
+    p.add_argument("--glm53-prefill-attention-graph",choices=["off","on"],default="off")
     args, _ = p.parse_known_args(argv)
+    if args.glm53_dsa_indexer_mode == "compact" and not args.glm53_dsa_logits_workspace_mib:
+        p.error("compact indexer requires --glm53-dsa-logits-workspace-mib")
+    if args.glm53_dsa_logits_workspace_mib is not None and args.glm53_dsa_logits_workspace_mib <= 0:
+        p.error("logits workspace must be positive")
+    if args.glm53_dcp_prefill_mode == "q-stream" and args.glm53_profile != "cp8-dcp4":
+        p.error("q-stream requires the cp8-dcp4 profile")
+    if args.glm53_prefill_attention_graph == "on" and args.glm53_dcp_prefill_mode != "q-stream":
+        p.error("attention graph requires q-stream")
+    if args.glm53_hicache_event_sync == "pipelined" and not args.enable_hierarchical_cache:
+        p.error("pipelined consensus requires HiCache")
     if "--skip-server-warmup" in argv and os.environ.get("SGLANG_GLM53_PREFILL_WARMUP", "1") == "1":
         p.error("The GLM53 prefill profile requires warmup before readiness")
     buckets = args.cuda_graph_bs_prefill
@@ -228,6 +243,13 @@ def configure_runtime_env(profile):
     os.environ.pop("SGLANG_GLM53_DEEPEP_PREFILL", None)
     os.environ.pop("SGLANG_GLM53_DEEPEP_OPT", None)
     cp = profile.glm53_profile == "cp8-dcp4"
+    if cp:
+        os.environ["SGLANG_GLM53_EXPECTED_RUNTIME"] = json.dumps(dict(
+            chunk=profile.chunked_prefill_size, slots=profile.max_running_requests,
+            delay=profile.min_free_slots_delay, prefill_backend=profile.dsa_prefill_backend,
+            graph=profile.cuda_graph_backend_prefill, buckets=profile.cuda_graph_bs_prefill))
+    else:
+        os.environ.pop("SGLANG_GLM53_EXPECTED_RUNTIME",None)
     warmup = os.environ.get("SGLANG_GLM53_PREFILL_WARMUP", "1")
     if warmup not in ("0", "1"):
         raise ValueError("SGLANG_GLM53_PREFILL_WARMUP must be 0 or 1")

@@ -28,7 +28,7 @@ def run(url, buckets, *, headers, verify, timeout, post=None):
         result = post(url + "/generate", json=body, headers=headers, verify=verify, timeout=timeout)
         result.raise_for_status()
         info = result.json().get("meta_info", {})
-        reason = info.get("finish_reason", {})
+        reason = info.get("finish_reason", {}) if isinstance(info,dict) else {}
         if not isinstance(info, dict) or not isinstance(reason, dict) or reason.get("type") in (None, "abort"):
             raise RuntimeError("GLM53 prefill warmup did not finish generation")
         logger.info("glm53_prefill warmup shape=%d completed", len(body["input_ids"]))

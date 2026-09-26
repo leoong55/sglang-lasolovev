@@ -3891,7 +3891,7 @@ class Scheduler(
                 candidates.append(Candidate(r, work, memory))
             interleave_plan = self.prefill_interleaver.plan(
                 continuing_req, candidates, remaining=remaining,
-                budget=adder.rem_chunk_tokens, page=self.page_size, slots=slots,
+                budget=adder.rem_chunk_tokens, page=self.page_size * get_parallel().dcp_size, slots=slots,
                 kv_budget=adder.rem_total_tokens,
                 minimum=get_schedule().prefill_interleaving_min_continuation_tokens,
                 adaptive=get_schedule().prefill_interleaving_mode == "adaptive",
@@ -4090,7 +4090,8 @@ class Scheduler(
         if diag.enabled():
             diag.record("batch", new_tokens=sum(r.extend_range.length for r in can_run_list),
                         prefix_tokens=sum(len(r.prefix_indices) for r in can_run_list),
-                        requests=len(can_run_list),
+                        requests=len(can_run_list), request_ids=[r.rid for r in can_run_list],
+                        continuation_fraction=(continuing_req.extend_range.length / max(1,sum(r.extend_range.length for r in can_run_list))) if continuing_req in can_run_list else 0.,
                         continuation_tokens=continuing_req.extend_range.length if continuing_req in can_run_list else 0)
         new_batch.prepare_for_extend()
 

@@ -17,7 +17,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 REASONS = frozenset({"token_budget", "kv_capacity", "request_slots", "delayer",
                      "batch_full", "partial_prefill", "host_cache", "other"})
-STAGES = frozenset({"dcp_gather", "kv_convert", "indexer", "topk", "attention",
+STAGES = frozenset({"dcp_gather", "dcp_reduce", "kv_convert", "indexer", "topk", "attention",
                     "moe", "draft_append", "hicache_consensus", "warmup"})
 _pending = deque(maxlen=256)
 _rank = 0
