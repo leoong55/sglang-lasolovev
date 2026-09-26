@@ -1,5 +1,5 @@
 {
-  "status": "partial; six profiles measured; P6buckets improves continuous short-request TTFT; full-model numerical cache parity unresolved",
+  "status": "partial; seven profiles measured; P8 fresh/mixed gain; numerical parity unresolved",
   "profiles": [
     {
       "attempt": "p2-r4",
@@ -330,8 +330,67 @@
       "decode_interval_mean_s": 0.03268943540890035,
       "requests": 240,
       "errors": 0
+    },
+    {
+      "attempt": "p8-expertlayout-r1",
+      "profile": "P8: expert layout",
+      "scenario": "fresh",
+      "ttft_p50_s": 5.048564120195806,
+      "ttft_p95_s": 5.048564120195806,
+      "e2e_p50_s": 6.68640693416819,
+      "decode_interval_mean_s": 0.006422912995970132,
+      "requests": 3,
+      "errors": 0
+    },
+    {
+      "attempt": "p8-expertlayout-r1",
+      "profile": "P8: expert layout",
+      "scenario": "mixed",
+      "ttft_p50_s": 2.6989568769931793,
+      "ttft_p95_s": 6.276933013950472,
+      "e2e_p50_s": 9.16582446405664,
+      "decode_interval_mean_s": 0.02220345380003838,
+      "requests": 21,
+      "errors": 0
+    },
+    {
+      "attempt": "p8-expertlayout-r1",
+      "profile": "P8: expert layout",
+      "scenario": "constant",
+      "ttft_p50_s": 0.942825524834916,
+      "ttft_p95_s": 1.5763842570595443,
+      "e2e_p50_s": 15.088150675874203,
+      "decode_interval_mean_s": 0.06548997045926798,
+      "requests": 243,
+      "errors": 0
+    },
+    {
+      "attempt": "p8-expertlayout-r1",
+      "profile": "P8: expert layout",
+      "scenario": "burst",
+      "ttft_p50_s": 4.276895636576228,
+      "ttft_p95_s": 8.77733177775517,
+      "e2e_p50_s": 15.741477104020305,
+      "decode_interval_mean_s": 0.04212559982846655,
+      "requests": 120,
+      "errors": 0
+    },
+    {
+      "attempt": "p8-expertlayout-r1",
+      "profile": "P8: expert layout",
+      "scenario": "repeated",
+      "ttft_p50_s": 2.609735769452527,
+      "ttft_p95_s": 3.5408392580109647,
+      "e2e_p50_s": 11.010591415106319,
+      "decode_interval_mean_s": 0.032709179745242914,
+      "requests": 240,
+      "errors": 0
     }
   ],
-  "source_commit": "4f440e4f5",
+  "source_commits": {
+    "p2_to_p6": "4f440e4f5",
+    "p8": "1b99488b8",
+    "p9_unmeasured": "0b3735e42"
+  },
   "baseline_run": false
 }

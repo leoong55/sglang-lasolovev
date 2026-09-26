@@ -1,0 +1,24 @@
+{
+  "runtime_source": "0b3735e42",
+  "status": "failed",
+  "completed_cases_before_failure": 7,
+  "planned_cases_per_rank": 36,
+  "ranks": 8,
+  "failure": {
+    "rank": 0,
+    "layer": 3,
+    "rows": 2048,
+    "seed": 41,
+    "layout": "identity",
+    "check": "graph vs eager",
+    "mismatch_fraction": 0.027,
+    "max_absolute_difference": 0.052734375
+  },
+  "archive_sha256": "36b971a1bc5d699782182ace1dbceb769f82fe6608c91b45e742afa1ce5e2095",
+  "all_files_sha256_verified": true,
+  "file_count": 5,
+  "full_model_numerical_parity": false,
+  "p9_serving_launched": false,
+  "next_diagnostic": "diagnostics/probe_humming_drift.py",
+  "hypothesis": "Stream-K partial BF16 accumulation and/or route ordering, not yet confirmed"
+}
