@@ -50,7 +50,9 @@ extracted = ast.Module(
 )
 env = dict(
     globals(),
+    SglExt=lambda **kw: N(split_ids=lambda: (None,None)),
     should_include_usage=lambda *a: (False, False),
+    get_serving=lambda: N(stream_response_default_include_usage=False),
     build_sse_content=lambda **kw: "data: " + json.dumps(kw) + "\n\n",
 )
 exec(compile(ast.fix_missing_locations(extracted), str(path), "exec"), env)
@@ -84,6 +86,8 @@ def fixture(samples=1, finish=False):
     chat = env["Chat"]()
     chat.tokenizer_manager = tm
     chat._reported_prompt_tokens = lambda meta: 2
+    chat._should_return_input_ids = lambda request: False
+    chat._should_return_output_ids = lambda request: False
     chat.create_error_response = lambda msg: N(error=msg, status_code=400)
 
     async def content(**kwargs):
@@ -155,7 +159,7 @@ class ChatDisconnectTests(unittest.IsolatedAsyncioTestCase):
                         )
                     self.assertEqual(len(lifecycle.aborted(tm)), samples)
                     self.assertTrue(
-                        all(s.abort_requested for s in tm.rid_to_state.values())
+                        all(s.abort_sent for s in tm.rid_to_state.values())
                     )
 
     async def test_asgi23_receive_disconnect_during_send_closes_all_samples(self):

@@ -2755,7 +2755,7 @@ class DFlashWorkerV2(BaseSpecWorker):
         can_run_cuda_graph = target_out.can_run_cuda_graph
         diagnostics.graph_status(
             bs=bs, width=block_size, draft=draft_out.can_run_graph,
-            verify=can_run_cuda_graph, sampler=folded,
+            verify=can_run_cuda_graph, sampler=self._draft_sampler is not None and draft_out.can_run_graph,
             draft_runner=self.draft_model_runner.decode_cuda_graph_runner,
             draft_batch=forward_batch,
             verify_runner=self.model_runner.decode_cuda_graph_runner,
