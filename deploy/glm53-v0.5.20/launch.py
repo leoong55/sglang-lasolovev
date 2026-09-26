@@ -10,7 +10,7 @@ from baseline_profile import validate
 from install import install, package_root
 
 SUPPORTED_CHUNKS = (4096, 8192, 16384, 32768)
-CAPTURE_CHUNKS = (8192, 16384, 32768)
+CAPTURE_CHUNKS = (4096, 8192, 12288, 16384, 32768)
 
 
 def configure(argv):
@@ -65,9 +65,6 @@ def check_profile(argv):
     args, _ = p.parse_known_args(argv)
     if "--skip-server-warmup" in argv and os.environ.get("SGLANG_GLM53_PREFILL_WARMUP", "1") == "1":
         p.error("The GLM53 prefill profile requires warmup before readiness")
-    # C1 campaign's 4k experiment used eager prefill only; preserve that boundary.
-    if args.chunked_prefill_size == 4096 and args.cuda_graph_backend_prefill != "disabled":
-        p.error("4096 prefill requires --cuda-graph-backend-prefill disabled")
     buckets = args.cuda_graph_bs_prefill
     if args.cuda_graph_backend_prefill == "breakable" and (
         not buckets
@@ -76,7 +73,7 @@ def check_profile(argv):
         or max(buckets) != args.chunked_prefill_size
         or args.cuda_graph_max_bs_prefill != args.chunked_prefill_size
     ):
-        p.error("Prefill buckets must be a sorted unique subset of 8192/16384/32768; their maximum and --cuda-graph-max-bs-prefill must equal --chunked-prefill-size")
+        p.error("Prefill buckets must be a sorted unique subset of 4096/8192/12288/16384/32768; their maximum and --cuda-graph-max-bs-prefill must equal --chunked-prefill-size")
     if (
         args.max_running_requests <= 0
         or args.dsa_prefill_backend not in (

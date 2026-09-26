@@ -73,6 +73,9 @@ def check_server_args(server_args: Any):
                 or cfg.hicache_host_memory_mode != "cache"):
             raise ValueError("Pipelined HiCache requires DP1/PP1 cache mode without storage or linker")
 
+    if cfg.glm53_prefill_attention_graph == "on" and cfg.glm53_dcp_prefill_mode != "q-stream":
+        raise ValueError("Prefill attention graphs require q-stream")
+
     # Check parallel size constraints
     if cfg.ep_join_mode != "scale":
         assert (cfg.tp_size * cfg.pp_size) % cfg.nnodes == 0, (

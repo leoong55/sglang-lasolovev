@@ -34,11 +34,14 @@ class LaunchMigrationTests(unittest.TestCase):
             self.assertEqual(launch.os.environ["SGLANG_GLM53_DFLASH_DCP"], "1")
             self.assertNotIn("SGLANG_ENABLE_CP_V2", launch.os.environ)
 
-    def test_4096_does_not_silently_enable_unsupported_graph_bucket(self):
-        for flag in ("--chunked-prefill-size", "--cuda-graph-max-bs-prefill", "--cuda-graph-bs-prefill"):
-            self.set_value(flag, "4096")
-        with self.assertRaises(SystemExit):
-            launch.check_profile(self.argv)
+    def test_4096_graph_bucket_is_explicitly_supported(self):
+        for flag in ("--chunked-prefill-size", "--cuda-graph-max-bs-prefill"):
+            self.set_value(flag,"4096")
+        idx=self.argv.index("--cuda-graph-bs-prefill")
+        end=idx+1
+        while end<len(self.argv) and not self.argv[end].startswith("--"):end+=1
+        self.argv[idx+1:end]=["4096"]
+        self.assertEqual(launch.check_profile(self.argv).cuda_graph_bs_prefill,[4096])
 
     def test_supplied_profile_keeps_full_draft_and_16k_prefill(self):
         profile = launch.check_profile(self.argv)

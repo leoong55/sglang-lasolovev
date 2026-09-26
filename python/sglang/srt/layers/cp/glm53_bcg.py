@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-CAPTURE_TOKEN_SIZES = (8192, 16384, 32768)
+CAPTURE_TOKEN_SIZES = (4096, 8192, 12288, 16384, 32768)
 
 
 def validate_capture_sizes(sizes):
@@ -19,7 +19,7 @@ def validate_capture_sizes(sizes):
         or list(sizes) != sorted(set(sizes))
     ):
         raise ValueError(
-            "GLM53 BCG requires a sorted, unique subset of [8192, 16384, 32768]"
+            "GLM53 BCG requires a sorted, unique subset of [4096, 8192, 12288, 16384, 32768]"
         )
     return list(sizes)
 

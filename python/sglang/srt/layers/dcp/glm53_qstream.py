@@ -30,6 +30,8 @@ def prepare_layout(translator, batch):
     # The allocator's widened pages guarantee at most ceil(n/size) owned rows
     # per sequence. Sort virtual IDs, not logical positions or physical pages.
     capacity = max(1, sum((n + size - 1) // size for n in lens))
+    # Stable KV capacities avoid recapturing for every context-length increment.
+    capacity = 1 << (capacity - 1).bit_length()
     padded = torch.cat((torch.where(owned, wide, SENTINEL), wide.new_full((capacity,), SENTINEL)))
     selected = padded.sort().values[:capacity]
     physical = translator.translate_dcp_read_ids(torch.where(selected == SENTINEL, 0, selected)).int()
@@ -61,6 +63,7 @@ class QStreamAttention:
         self.group = group
         self.kv_buffer = None
         self.identity = None
+        self.tile_graph = None
 
     def prepare_kv(self, packed, layout, topk):
         from sglang.kernels.ops.attention.dsa.dequant_k_cache import gather_dequant_requant_fp8_paged
@@ -98,6 +101,22 @@ class QStreamAttention:
         from sglang.srt.observability.glm53_prefill import stage
         kv = self.prepare_kv(packed_kv, layout, indices.shape[1])
         out = torch.empty((q.shape[0], q.shape[1], 512), dtype=torch.bfloat16, device=q.device)
+        from sglang.srt.runtime_context import get_schedule
+        from sglang.srt.model_executor.runner import get_is_capture_mode
+        from sglang.srt.layers.dcp.glm53_qstream_graph import TileGraph, signature
+        graph_on = get_schedule().glm53_prefill_attention_graph == "on" and not get_is_capture_mode()
+        if graph_on:
+            shape = (TILE,*q.shape[1:])
+            key = signature(kv,shape,indices.shape[1],scale,self.group)
+            if self.tile_graph is None or self.tile_graph.key != key:
+                self.tile_graph = None  # Invalidate when KV address/capacity changes.
+                self.tile_graph = TileGraph(self,shape,indices.shape[1],kv,layout,scale)
+            self.tile_graph.update_layout(layout)
+            with stage("attention"):
+                for start in range(0,q.shape[0],TILE):
+                    result = self.tile_graph.replay(q[start:start+TILE],indices[start:start+TILE])
+                    out[start:start+result.shape[0]].copy_(result)
+            return out
         q_stage = torch.zeros((TILE,*q.shape[1:]),dtype=q.dtype,device=q.device)
         ids_stage = indices.new_full((TILE,indices.shape[1]), -1)
         with stage("attention"):

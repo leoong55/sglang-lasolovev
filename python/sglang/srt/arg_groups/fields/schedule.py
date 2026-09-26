@@ -72,6 +72,9 @@ class Schedule(msgspec.Struct):
     prefill_interleaving_min_continuation_tokens: A[
         Optional[int], "Minimum continuing tokens, aligned to the logical KV page. Adaptive defaults to one page.",
     ] = None
+    glm53_prefill_attention_graph: A[
+        str, Arg(help="Capture the fixed Q-stream tile loop; requires q-stream.", choices=["off", "on"]),
+    ] = "off"
     glm53_hicache_event_sync: A[
         str, Arg(help="HiCache readiness consensus; pipelined requires PP1/DP1 without storage/linker.", choices=["sync", "pipelined"]),
     ] = "sync"
