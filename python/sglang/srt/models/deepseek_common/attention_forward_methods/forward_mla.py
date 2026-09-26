@@ -130,7 +130,7 @@ def _zero_dsa_dcp_padding(
     num_valid_tokens = (
         forward_batch.extend_num_tokens
         if get_attn_tp_context().input_scattered
-        else forward_batch.num_token_non_padded_cpu
+        else forward_batch.global_num_token_non_padded_cpu
     )
     if num_valid_tokens is not None and num_valid_tokens < attn_output.shape[0]:
         attn_output[num_valid_tokens:] = 0
