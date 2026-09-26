@@ -956,9 +956,11 @@ class DeepseekV2MoE(nn.Module):
         has_shared_output = (
             hidden_states.shape[0] > 0 and self.num_fused_shared_experts == 0
         )
+        # Fixed initial layouts also need remapping when online EPLB is off.
+        # init_new returns None when no dispatch algorithm is configured.
         dispatch_info = (
             ExpertLocationDispatchInfo.init_new(layer_id=self.layer_id)
-            if get_exec().moe.enable_eplb and not self.is_nextn
+            if not self.is_nextn
             else None
         )
         # router_logits: (num_tokens, n_experts)
@@ -1056,9 +1058,10 @@ class DeepseekV2MoE(nn.Module):
             self.shared_experts.gate_up_proj
         ):
             return self.forward_cpu(hidden_states)
+        # Match the a2a path: initial placement is independent of online EPLB.
         dispatch_info = (
             ExpertLocationDispatchInfo.init_new(layer_id=self.layer_id)
-            if get_exec().moe.enable_eplb and not self.is_nextn
+            if not self.is_nextn
             else None
         )
         defer_shared = not self.experts.moe_runner_config.inplace

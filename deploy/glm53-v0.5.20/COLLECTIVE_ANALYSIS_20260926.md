@@ -96,3 +96,17 @@ loader/remap; draft-worker не перезаписывает target metadata.
 P8 ещё не запущен; обязательны численная проверка и сопоставимый workload.
 См.expert-count-analysis.json, expert-trace-correlation.json и
 p8-expertlayout-r1-design.json.
+
+
+### Исправление перед опытом P8
+
+Кодовая проверка выявила реальный дефект normal/normal-dual-stream MoE:
+ExpertLocationDispatchInfo создавался только при enable_eplb. При
+init_expert_location и отключённой онлайн-балансировке checkpoint loader уже
+переставлял веса, а router оставлял логические ID без remap.
+Исправление использует init_new для target и оставляет draft/nextn без remap,
+как уже делает a2a-путь; init_new возвращает None при отсутствии алгоритма.
+Две CPU-регрессии воспроизводят неверного эксперта на старом коде и проходят
+после правки; также покрыты обычная карта и draft. Это проверка control flow,
+не CUDA numerical gate. Текущие измеренные P2–P7 использовали trivial layout
+и не затронуты. P8 будет единственным сравнением с этим исправлением.
