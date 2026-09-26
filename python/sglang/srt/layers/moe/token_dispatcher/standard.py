@@ -34,6 +34,7 @@ from sglang.srt.layers.moe.utils import (
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils.common import (
     get_bool_env_var,
+    get_compiler_backend,
     get_device,
     is_hip,
 )
@@ -44,6 +45,7 @@ _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
 from sglang.srt.environ import envs as _envs
 
 _MASK_DP_PAD_MOE = _envs.SGLANG_OPT_MASK_DP_PAD_MOE.get()
+_PRESERVE_MOE_PAD_IDS = _envs.SGLANG_GLM53_PRESERVE_MOE_PAD_IDS.get()
 
 if TYPE_CHECKING:
     from sglang.srt.layers.moe.topk import TopKOutput
@@ -93,6 +95,12 @@ class StandardCombineInput(NamedTuple):
 
 
 assert isinstance(StandardCombineInput, CombineInput)
+
+
+@torch.compile(dynamic=True, backend=get_compiler_backend())
+def _map_experts_preserving_padding(local_expert_mapping, topk_ids):
+    # A negative sentinel must not index the last mapping-table entry.
+    return torch.where(topk_ids >= 0, local_expert_mapping[topk_ids], -1)
 
 
 class StandardDispatcher(BaseDispatcher):
@@ -227,7 +235,12 @@ class StandardDispatcher(BaseDispatcher):
                 )
             elif not self.use_aiter_moe_runner:
                 if TopKOutputChecker.format_is_standard(topk_output):
-                    topk_ids_local = self.local_expert_mapping[topk_output.topk_ids]
+                    if _PRESERVE_MOE_PAD_IDS:
+                        topk_ids_local = _map_experts_preserving_padding(
+                            self.local_expert_mapping, topk_output.topk_ids
+                        )
+                    else:
+                        topk_ids_local = self.local_expert_mapping[topk_output.topk_ids]
                     # Drop dp-attention MAX_LEN pad rows from the dispatch:
                     # pad rows carry stale hidden through the router and
                     # their expert outputs are discarded downstream — pure

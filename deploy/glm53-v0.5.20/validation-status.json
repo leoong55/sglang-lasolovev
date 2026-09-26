@@ -13,6 +13,11 @@
       "source_commit": "1b99488b8",
       "both_fail_on_unpatched_source": true,
       "scope": "normal forward CPU stand-ins and dual-stream dispatch control flow; not GPU arithmetic"
+    },
+    "moe_pad_id_regression": {
+      "tests_passed": 2,
+      "unpatched_source_failures": 2,
+      "scope": "Actual StandardDispatcher.dispatch AST with CPU vector stand-ins; CUDA numerical retest pending"
     }
   },
   "cuda": {
@@ -41,6 +46,15 @@
       "passed": 24,
       "exact_bytes": true,
       "scope": "Pool transfers and local DCP/sidecar mapping on one H200, not full-model or consensus parity"
+    },
+    "expert_arithmetic_r1": {
+      "status": "failed",
+      "layer": 3,
+      "rows": 1,
+      "rank": 7,
+      "identity_layout": true,
+      "diagnosis": "-1 padding aliases last expert in standard EP mapping; opt-in preservation patch prepared",
+      "full_model_parity": false
     }
   },
   "image_built": false,

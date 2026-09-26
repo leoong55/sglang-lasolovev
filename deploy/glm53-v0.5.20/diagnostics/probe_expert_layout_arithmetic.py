@@ -72,7 +72,7 @@ for layer_id in [3,41,77]:
     ref=reference_local(x,local,weights,packed[name],scales[name],factor)
     eager=forward(name).clone();graphs[name].replay();torch.cuda.synchronize();actual=outputs[name].clone()
     torch.testing.assert_close(actual,eager,rtol=.001,atol=.002)
-    err=relative_error(actual,ref);assert err<=.08,(rank,layer_id,n,name,err)
+    err=relative_error(actual,ref);assert err<=.08,(rank,layer_id,n,seed,int(valid),name,err)
     fp=actual.float();dist.all_reduce(fp);dist.all_reduce(ref);ep_error=relative_error(fp,ref);assert ep_error<=.08,(rank,layer_id,n,name,'EP8 reference',ep_error)
     low=actual.clone();dist.all_reduce(low)
     summed[name]=fp;refs[name]=ref;bf16[name]=low
