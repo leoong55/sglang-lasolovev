@@ -32,6 +32,7 @@ def check_profile(argv):
     p.add_argument("--model-path")
     p.add_argument("--chunked-prefill-size", required=True, type=int, choices=SUPPORTED_CHUNKS)
     p.add_argument("--max-running-requests", required=True, type=int)
+    p.add_argument("--min-free-slots-delay", type=int, default=1)
     p.add_argument("--cuda-graph-backend-decode", required=True, choices=["full", "disabled"])
     p.add_argument("--cuda-graph-max-bs-decode", type=int)
     p.add_argument("--cuda-graph-bs-decode", nargs="+", type=int)
@@ -62,6 +63,8 @@ def check_profile(argv):
     p.add_argument("--hicache-io-backend", choices=["direct"])
     p.add_argument("--hicache-host-memory-mode", choices=["cache"])
     args, _ = p.parse_known_args(argv)
+    if "--skip-server-warmup" in argv and os.environ.get("SGLANG_GLM53_PREFILL_WARMUP", "1") == "1":
+        p.error("The GLM53 prefill profile requires warmup before readiness")
     # C1 campaign's 4k experiment used eager prefill only; preserve that boundary.
     if args.chunked_prefill_size == 4096 and args.cuda_graph_backend_prefill != "disabled":
         p.error("4096 prefill requires --cuda-graph-backend-prefill disabled")
@@ -228,6 +231,11 @@ def configure_runtime_env(profile):
     os.environ.pop("SGLANG_GLM53_DEEPEP_PREFILL", None)
     os.environ.pop("SGLANG_GLM53_DEEPEP_OPT", None)
     cp = profile.glm53_profile == "cp8-dcp4"
+    warmup = os.environ.get("SGLANG_GLM53_PREFILL_WARMUP", "1")
+    if warmup not in ("0", "1"):
+        raise ValueError("SGLANG_GLM53_PREFILL_WARMUP must be 0 or 1")
+    os.environ["SGLANG_GLM53_PREFILL_WARMUP"] = warmup if cp else "0"
+    os.environ["SGLANG_GLM53_PREFILL_WARMUP_BUCKETS"] = ",".join(map(str, profile.cuda_graph_bs_prefill or [profile.chunked_prefill_size]))
     os.environ.pop("SGLANG_ENABLE_CP_V2", None)  # removed by upstream 0.5.20
     os.environ["SGLANG_GLM53_PREFILL_BCG"] = "1" if cp and profile.cuda_graph_backend_prefill == "breakable" else "0"
     os.environ["SGLANG_GLM53_DFLASH_DCP"] = "1" if cp and profile.speculative_algorithm == "DFLASH" else "0"

@@ -2336,6 +2336,11 @@ def _execute_server_warmup(server_args: ServerArgs):
                 verify=ssl_verify,
             )
             assert res.status_code == 200, f"{res.text}"
+            if os.environ.get("SGLANG_GLM53_PREFILL_WARMUP") == "1":
+                from sglang.srt.observability.glm53_prefill_warmup import run
+                buckets = [int(x) for x in os.environ["SGLANG_GLM53_PREFILL_WARMUP_BUCKETS"].split(",")]
+                run(url, buckets, headers=headers, verify=ssl_verify,
+                    timeout=warmup_timeout if warmup_timeout > 0 else 600)
             # Skip server_status update for Rust server
             if not envs.SGLANG_RUST_SERVER.get():
                 _global_state.tokenizer_manager.server_status = ServerStatus.Up

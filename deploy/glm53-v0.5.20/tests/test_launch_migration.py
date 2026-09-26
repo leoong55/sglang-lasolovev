@@ -40,10 +40,12 @@ class LaunchMigrationTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             launch.check_profile(self.argv)
 
-    def test_supplied_profile_keeps_full_draft_and_8k_prefill(self):
+    def test_supplied_profile_keeps_full_draft_and_16k_prefill(self):
         profile = launch.check_profile(self.argv)
         self.assertEqual(profile.glm53_draft_cache_window, 0)
-        self.assertEqual(profile.chunked_prefill_size, 8192)
+        self.assertEqual(profile.chunked_prefill_size, 16384)
+        self.assertEqual(profile.cuda_graph_bs_prefill, [8192, 16384])
+        self.assertEqual(profile.min_free_slots_delay, 1)
         self.assertEqual(profile.speculative_dflash_block_size, 8)
         self.assertEqual(profile.moe_runner_backend, "humming")
         self.assertEqual(profile.cuda_graph_bs_decode, [1, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40])
