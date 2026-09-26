@@ -2,7 +2,7 @@
   "date": "2026-09-26",
   "base_commit": "fcd40b5f1ac133afaf4cd1aba8f63d3d4c9af57a",
   "cpu": {
-    "passed": 52,
+    "passed": 56,
     "subtests_passed": 20,
     "command": "python -m pytest -q deploy/glm53-v0.5.20/tests",
     "python": "3.11.7",
@@ -10,13 +10,41 @@
     "platform": "macOS arm64"
   },
   "cuda": {
-    "skipped": 7,
-    "reason": "No CUDA GPUs available on this host",
-    "executed": false
+    "executed": true,
+    "device": "H200 SM90",
+    "torch": "2.13.0+cu130",
+    "compact": {
+      "cases_passed": 3,
+      "source_commit": "08391453b"
+    },
+    "qstream": {
+      "unique_cases_passed": 4,
+      "ranks": 4,
+      "cases_passed_per_rank": 4,
+      "source_commit": "93a6150ed",
+      "eager_and_graph": true
+    },
+    "full_model_validated": false
   },
   "image_built": false,
   "model_requests_sent": 0,
   "performance_validated": false,
   "oom_headroom_validated": false,
-  "validated_gpu_profile": null
+  "validated_gpu_profile": null,
+  "source_tested": "93a6150ed",
+  "server_startup": {
+    "status": "blocked_host_ram_before_readiness",
+    "prefill_capture": "passed",
+    "target_verify_capture": "passed",
+    "draft_verify_capture": "passed",
+    "hicache_size_GB_per_rank": 96,
+    "host_budget_GB_per_rank": 92.32,
+    "estimated_total_host_cache_GB": 934.45,
+    "gpu_free_after_capture_GiB": [
+      19.36,
+      20.54
+    ],
+    "target_kv_physical_tokens": 600000,
+    "dcp_logical_tokens": 2400000
+  }
 }
