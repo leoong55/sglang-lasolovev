@@ -27,18 +27,20 @@
     "full_model_validated": false
   },
   "image_built": false,
-  "model_requests_sent": 2562,
+  "model_requests_sent": 3820,
   "performance_validated": false,
   "oom_headroom_validated": false,
   "validated_gpu_profile": null,
   "source_tested": "4f440e4f5",
   "server_startup": {
-    "status": "four_profiles_ready_and_workloads_completed",
+    "status": "six_profiles_ready_and_workloads_completed",
     "hicache_size_GB_per_rank": 64,
     "P2": 627,
     "P3": 627,
     "P4": 627,
-    "P5_on_P3": 627
+    "P5_on_P3": 627,
+    "P6graph_on_P4": 627,
+    "P6buckets_on_P2": 627
   },
   "server_startup_previous_hicache96": {
     "status": "blocked_host_ram_before_readiness",
@@ -56,15 +58,19 @@
     "dcp_logical_tokens": 2400000
   },
   "performance_measurements_available": true,
-  "performance_requests": 2508,
+  "performance_requests": 3762,
   "performance_request_errors": 0,
   "additional_cache_diagnostic_requests": 49,
-  "smoke_requests": 5,
+  "smoke_requests": 7,
   "model_request_count_scope": "External campaign clients only; excludes internal startup warmup and health requests",
   "remaining": [
-    "P6 graphs and buckets",
-    "Final combined accepted profile",
+    "Profile-guided NCCL diagnostic and targeted experiment if supported",
+    "Final report/profile acceptance with long/decode tradeoffs",
     "Full-model numerical cache transfer parity"
   ],
-  "cleanup_blocker": "Auto-review denies deleting own P5 server due heartbeat read-only scope; explicit user confirmation pending"
+  "cleanup_blocker": null,
+  "profiling_requests": 2,
+  "performance_acceptance": {
+    "P6buckets": "Continuous short-only p95 2.441 to1.432s vsP2; three paired seeds. Fresh/mixed nearly unchanged. Full cache tensor parity still inconclusive."
+  }
 }

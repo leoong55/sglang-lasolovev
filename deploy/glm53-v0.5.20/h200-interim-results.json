@@ -1,5 +1,5 @@
 {
-  "status": "partial; P6 not yet run; full-model numerical cache parity unresolved",
+  "status": "partial; six profiles measured; P6buckets improves continuous short-request TTFT; full-model numerical cache parity unresolved",
   "profiles": [
     {
       "attempt": "p2-r4",
@@ -218,6 +218,116 @@
       "ttft_p95_s": 3.8552533952984955,
       "e2e_p50_s": 11.223537035984918,
       "decode_interval_mean_s": 0.03274284801891019,
+      "requests": 240,
+      "errors": 0
+    },
+    {
+      "attempt": "p6graph-r1",
+      "profile": "P6: tile graph",
+      "scenario": "fresh",
+      "ttft_p50_s": 11.241900092922151,
+      "ttft_p95_s": 11.241900092922151,
+      "e2e_p50_s": 12.85385338589549,
+      "decode_interval_mean_s": 0.006321385462640547,
+      "requests": 3,
+      "errors": 0
+    },
+    {
+      "attempt": "p6graph-r1",
+      "profile": "P6: tile graph",
+      "scenario": "mixed",
+      "ttft_p50_s": 6.056721088010818,
+      "ttft_p95_s": 13.66735851122066,
+      "e2e_p50_s": 16.582540788920596,
+      "decode_interval_mean_s": 0.0376024177424474,
+      "requests": 21,
+      "errors": 0
+    },
+    {
+      "attempt": "p6graph-r1",
+      "profile": "P6: tile graph",
+      "scenario": "constant",
+      "ttft_p50_s": 2.759578718803823,
+      "ttft_p95_s": 6.871068665990606,
+      "e2e_p50_s": 21.161533801117912,
+      "decode_interval_mean_s": 0.07503075089566708,
+      "requests": 243,
+      "errors": 0
+    },
+    {
+      "attempt": "p6graph-r1",
+      "profile": "P6: tile graph",
+      "scenario": "burst",
+      "ttft_p50_s": 9.057703151018359,
+      "ttft_p95_s": 18.756815105420536,
+      "e2e_p50_s": 23.48424874758348,
+      "decode_interval_mean_s": 0.05638956336128781,
+      "requests": 120,
+      "errors": 0
+    },
+    {
+      "attempt": "p6graph-r1",
+      "profile": "P6: tile graph",
+      "scenario": "repeated",
+      "ttft_p50_s": 4.607847752049565,
+      "ttft_p95_s": 7.01653101433767,
+      "e2e_p50_s": 13.373615741031244,
+      "decode_interval_mean_s": 0.033712069328963375,
+      "requests": 240,
+      "errors": 0
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "profile": "P6: buckets",
+      "scenario": "fresh",
+      "ttft_p50_s": 5.657740256050602,
+      "ttft_p95_s": 5.657740256050602,
+      "e2e_p50_s": 7.334197076968849,
+      "decode_interval_mean_s": 0.006672208639336567,
+      "requests": 3,
+      "errors": 0
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "profile": "P6: buckets",
+      "scenario": "mixed",
+      "ttft_p50_s": 3.140744827222079,
+      "ttft_p95_s": 7.095168730011208,
+      "e2e_p50_s": 9.96461840509437,
+      "decode_interval_mean_s": 0.023795535581718597,
+      "requests": 21,
+      "errors": 0
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "profile": "P6: buckets",
+      "scenario": "constant",
+      "ttft_p50_s": 1.0064419019035995,
+      "ttft_p95_s": 1.44350072205998,
+      "e2e_p50_s": 15.751361303962767,
+      "decode_interval_mean_s": 0.06333711648832657,
+      "requests": 243,
+      "errors": 0
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "profile": "P6: buckets",
+      "scenario": "burst",
+      "ttft_p50_s": 4.491446832427755,
+      "ttft_p95_s": 9.520764045242684,
+      "e2e_p50_s": 16.329210856580175,
+      "decode_interval_mean_s": 0.04282512793646139,
+      "requests": 120,
+      "errors": 0
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "profile": "P6: buckets",
+      "scenario": "repeated",
+      "ttft_p50_s": 2.734043928096071,
+      "ttft_p95_s": 3.9645396366599015,
+      "e2e_p50_s": 11.345788925420493,
+      "decode_interval_mean_s": 0.03268943540890035,
       "requests": 240,
       "errors": 0
     }

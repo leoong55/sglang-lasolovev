@@ -1,0 +1,156 @@
+{
+  "rows": [
+    {
+      "attempt": "p2-r4",
+      "run": "02-constant-r1",
+      "batches": [
+        {
+          "new_tokens": 4096,
+          "graph": false,
+          "count": 29
+        },
+        {
+          "new_tokens": 8192,
+          "graph": true,
+          "count": 7
+        },
+        {
+          "new_tokens": 12288,
+          "graph": false,
+          "count": 3
+        },
+        {
+          "new_tokens": 16384,
+          "graph": true,
+          "count": 15
+        }
+      ]
+    },
+    {
+      "attempt": "p2-r4",
+      "run": "07-constant-r2",
+      "batches": [
+        {
+          "new_tokens": 4096,
+          "graph": false,
+          "count": 29
+        },
+        {
+          "new_tokens": 8192,
+          "graph": true,
+          "count": 13
+        },
+        {
+          "new_tokens": 12288,
+          "graph": false,
+          "count": 3
+        },
+        {
+          "new_tokens": 16384,
+          "graph": true,
+          "count": 12
+        }
+      ]
+    },
+    {
+      "attempt": "p2-r4",
+      "run": "12-constant-r3",
+      "batches": [
+        {
+          "new_tokens": 4096,
+          "graph": false,
+          "count": 35
+        },
+        {
+          "new_tokens": 8192,
+          "graph": true,
+          "count": 12
+        },
+        {
+          "new_tokens": 12288,
+          "graph": false,
+          "count": 3
+        },
+        {
+          "new_tokens": 16384,
+          "graph": true,
+          "count": 11
+        }
+      ]
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "run": "02-constant-r1",
+      "batches": [
+        {
+          "new_tokens": 4096,
+          "graph": true,
+          "count": 47
+        },
+        {
+          "new_tokens": 8192,
+          "graph": true,
+          "count": 6
+        },
+        {
+          "new_tokens": 12288,
+          "graph": true,
+          "count": 3
+        },
+        {
+          "new_tokens": 16384,
+          "graph": true,
+          "count": 11
+        }
+      ]
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "run": "07-constant-r2",
+      "batches": [
+        {
+          "new_tokens": 4096,
+          "graph": true,
+          "count": 51
+        },
+        {
+          "new_tokens": 8192,
+          "graph": true,
+          "count": 7
+        },
+        {
+          "new_tokens": 12288,
+          "graph": true,
+          "count": 1
+        },
+        {
+          "new_tokens": 16384,
+          "graph": true,
+          "count": 11
+        }
+      ]
+    },
+    {
+      "attempt": "p6buckets-r1",
+      "run": "12-constant-r3",
+      "batches": [
+        {
+          "new_tokens": 4096,
+          "graph": true,
+          "count": 52
+        },
+        {
+          "new_tokens": 8192,
+          "graph": true,
+          "count": 8
+        },
+        {
+          "new_tokens": 16384,
+          "graph": true,
+          "count": 11
+        }
+      ]
+    }
+  ],
+  "limits": "TP0 only; server timestamps second-resolution, sampled workload windows expanded by1s. Workload>1token batches; no exact kernel replay duration inferred."
+}

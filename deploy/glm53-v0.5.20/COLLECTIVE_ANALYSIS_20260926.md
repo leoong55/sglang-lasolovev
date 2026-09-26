@@ -1,0 +1,64 @@
+# NCCL и ожидание других ranks — 26 сентября 2026
+
+## Что измерено
+
+В KV-gather профиле двух prefill-шагов TP0 сумма NCCL kernels составляет
+475 ms при span всех kernels 1364 ms. Эти числа не доказывают, что транспорт
+занимает треть времени: NCCL kernel может ждать поздно пришедших участников.
+
+Проверены 150 ReduceScatter kernels на каждом из восьми ranks. Во всех trace
+одинаковая Kineto timebase; сопоставление выполнено по порядку этих kernels.
+Медианы: разброс времени входа 1.860 ms, выхода 0.117 ms; минимальная длительность
+по ranks 0.535 ms, максимальная 2.334 ms. Это поддерживает гипотезу ожидания
+поздних ranks внутри collective. Это диагностическая корреляция двух шагов,
+не полное разложение TTFT и не доказательство постоянного bottleneck.
+
+Два последних Humming kernels перед ReduceScatter занимают у позднего rank
+медиану 2.895 ms, у раннего 1.103 ms. Поздний rank меняется между слоями,
+чаще всего это rank6 (37/150), затем rank0 (26/150), rank3 (22/150).
+Одного постоянно медленного GPU нет. Вероятная причина — различная работа
+экспертов MoE, но без token counts нельзя отделить routing imbalance от
+других различий запуска/форм kernel и влияния профайлера.
+
+## Ограниченная проверка NVLS
+
+Тот же образ, восемь H200, NCCL2.30.7, NV18 между всеми GPU. PyNccl проверен
+с BF16 tensors [4096/8192/16384,6144], ReduceScatter и AllGather,
+eager и CUDA graph, порядок off/on/on/off. Пять измерительных групп по30
+операций на каждую форму; между группами barrier. Все численные проверки
+на константных rank-зависимых tensors прошли на восьми ranks.
+
+Для16k graph median по16 rank/run observations:
+
+| Операция | NVLS off, ms | NVLS on, ms |
+|---|---:|---:|
+| ReduceScatter |0.5598|0.5578|
+| AllGather |0.5654|0.5632|
+
+Практического выигрыша нет. Логи on подтверждают наличие NVLS multicast,
+но проверенные коллективы выбирают **Ring/Simple**. Поэтому нельзя говорить,
+что сам NVLS-алгоритм медленный: он здесь не выбран. Полный GLM-прогон с одним
+этим флагом не оправдан, флаг остаётся выключенным.
+
+NCCL использует модель стоимости для выбора алгоритмов; регистрация пользовательских
+буферов — отдельный механизм, требующий корректного allocator и согласованности
+всех ranks. В этой проверке allocator не менялся. Название RING_LL в trace
+не доказывает LL-протокол; TUNING log в probe явно показывает Simple.
+
+Первичные источники:
+
+- [NCCL2.30.7 cost model](https://github.com/NVIDIA/nccl/blob/v2.30.7-1/src/graph/tuning.cc).
+- [NVIDIA: buffer registration, allocator и согласованность ranks](https://docs.nvidia.com/deeplearning/nccl/archives/nccl_2303/user-guide/docs/usage/bufferreg.html).
+- [NCCL issue о неоднозначных названиях RING_LL](https://github.com/NVIDIA/nccl/issues/2196).
+- [SGLang Expert Parallelism и EPLB](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/expert_parallelism.mdx).
+
+## Следующий различающий опыт
+
+Вариант p7-expertstats-r1 сохраняет P6buckets и включает только штатный stat
+recorder, без EPLB или перемещения весов. После exact nonce/natural-stop smoke
+три новых calibration inputs128k/1out позволят снять распределение tokens
+по экспертам/слоям. Эти запросы не входят в performance A/B. Калибровка
+синтетическая, вывод о производственных текстах потребует отдельной проверки.
+
+Сначала подтвердить или отвергнуть imbalance. Только затем выбирать балансировку
+или адресное изменение Humming; не подменять ожидание GPU «медленным NCCL».

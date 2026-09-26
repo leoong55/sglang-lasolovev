@@ -1,0 +1,124 @@
+{
+  "nccl": "2.30.7",
+  "device": "8 H200 NV18",
+  "all_numeric_checks_pass": true,
+  "order": [
+    "off",
+    "on",
+    "on",
+    "off"
+  ],
+  "rows": [
+    {
+      "n": 4096,
+      "hidden": 6144,
+      "op": "reduce_scatter",
+      "mode": "eager",
+      "off_ms": 0.16954080263773602,
+      "on_ms": 0.1796597401301066,
+      "on_vs_off_percent": 5.968437883352529
+    },
+    {
+      "n": 4096,
+      "hidden": 6144,
+      "op": "reduce_scatter",
+      "mode": "graph",
+      "off_ms": 0.17055466175079345,
+      "on_ms": 0.1725663979848226,
+      "on_vs_off_percent": 1.1795257974059892
+    },
+    {
+      "n": 4096,
+      "hidden": 6144,
+      "op": "all_gather",
+      "mode": "eager",
+      "off_ms": 0.17843626340230306,
+      "on_ms": 0.18022080262502033,
+      "on_vs_off_percent": 1.0000989645775338
+    },
+    {
+      "n": 4096,
+      "hidden": 6144,
+      "op": "all_gather",
+      "mode": "graph",
+      "off_ms": 0.17936053276062014,
+      "on_ms": 0.17433226108551025,
+      "on_vs_off_percent": -2.8034437664281264
+    },
+    {
+      "n": 8192,
+      "hidden": 6144,
+      "op": "reduce_scatter",
+      "mode": "eager",
+      "off_ms": 0.30422186851501465,
+      "on_ms": 0.30858720143636065,
+      "on_vs_off_percent": 1.4349175299771533
+    },
+    {
+      "n": 8192,
+      "hidden": 6144,
+      "op": "reduce_scatter",
+      "mode": "graph",
+      "off_ms": 0.2981733322143555,
+      "on_ms": 0.29658187230428057,
+      "on_vs_off_percent": -0.5337365009325579
+    },
+    {
+      "n": 8192,
+      "hidden": 6144,
+      "op": "all_gather",
+      "mode": "eager",
+      "off_ms": 0.3048837343851725,
+      "on_ms": 0.3122613271077474,
+      "on_vs_off_percent": 2.41980528657999
+    },
+    {
+      "n": 8192,
+      "hidden": 6144,
+      "op": "all_gather",
+      "mode": "graph",
+      "off_ms": 0.30607147216796876,
+      "on_ms": 0.30235945383707685,
+      "on_vs_off_percent": -1.2127946144731783
+    },
+    {
+      "n": 16384,
+      "hidden": 6144,
+      "op": "reduce_scatter",
+      "mode": "eager",
+      "off_ms": 0.5621407826741537,
+      "on_ms": 0.562670389811198,
+      "on_vs_off_percent": 0.09421254485841857
+    },
+    {
+      "n": 16384,
+      "hidden": 6144,
+      "op": "reduce_scatter",
+      "mode": "graph",
+      "off_ms": 0.5598378817240397,
+      "on_ms": 0.5578207969665527,
+      "on_vs_off_percent": -0.36029801185930577
+    },
+    {
+      "n": 16384,
+      "hidden": 6144,
+      "op": "all_gather",
+      "mode": "eager",
+      "off_ms": 0.5731904029846191,
+      "on_ms": 0.5655045509338379,
+      "on_vs_off_percent": -1.3408898702352179
+    },
+    {
+      "n": 16384,
+      "hidden": 6144,
+      "op": "all_gather",
+      "mode": "graph",
+      "off_ms": 0.5654047966003418,
+      "on_ms": 0.5632490475972494,
+      "on_vs_off_percent": -0.38127532982643597
+    }
+  ],
+  "actual_algorithm": "RING/SIMPLE for AllGather and ReduceScatter in NVLS on run",
+  "result": "No useful speedup from flag alone; do not run full-model NVLS-only profile",
+  "limits": "Isolated sequential PyNccl collectives with BF16 constants; not full model or proof of transport-only time in profile"
+}
