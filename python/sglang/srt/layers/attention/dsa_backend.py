@@ -24,6 +24,7 @@ from sglang.srt.runtime_context import (
     get_parallel,
     get_platform,
     get_spec,
+    get_schedule,
 )
 
 logger = logging.getLogger(__name__)
@@ -250,6 +251,7 @@ class DSAMetadata:
     topk_indices_offset: Optional[torch.Tensor] = None
     # Request-local positions mapped into the CP+DCP gathered KV buffer.
     dcp_page_table_1: Optional[torch.Tensor] = None
+    qstream_layout: object = None
 
     # k_start and k_end in kv cache for each token.
     indexer_k_start_end: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
@@ -334,6 +336,10 @@ class DeepseekSparseAttnBackend(
             1 if get_exec().deterministic.enable_deterministic_inference else 0
         )
         hf_config = model_runner.model_config.hf_config
+        if get_schedule().glm53_dcp_prefill_mode == "q-stream" and not model_runner.is_draft_worker:
+            from sglang.srt.configs.model_config import is_glm_moe_dsa
+            if not is_glm_moe_dsa(hf_config):
+                raise ValueError("Q-stream's first contract is GLM MoE DSA")
         self.use_dsa = is_deepseek_dsa(hf_config)
         assert self.use_dsa, "DSA backend only supports DeepSeek DSA"
         self.dsa_kv_cache_store_fp8 = (
@@ -1173,7 +1179,12 @@ class DeepseekSparseAttnBackend(
             )
 
         dcp_page_table_1 = None
-        if self.dcp_enabled and dsa_use_prefill_cp(forward_batch):
+        qstream_layout = None
+        qstream = get_schedule().glm53_dcp_prefill_mode == "q-stream"
+        if self.dcp_enabled and dsa_use_prefill_cp(forward_batch) and qstream:
+            from sglang.srt.layers.dcp.glm53_qstream import prepare_layout
+            qstream_layout = prepare_layout(self.kv_index_translator, forward_batch)
+        if self.dcp_enabled and dsa_use_prefill_cp(forward_batch) and not qstream:
             if indexer_seq_lens_cpu is None:
                 raise RuntimeError(
                     "DSA CP+DCP prefill requires host-side sequence lengths."
@@ -1224,6 +1235,7 @@ class DeepseekSparseAttnBackend(
             token_to_batch_idx=token_to_batch_idx,
             topk_v2_plan=self._build_topk_v2_plan(seqlens_expanded),
             dcp_page_table_1=dcp_page_table_1,
+            qstream_layout=qstream_layout,
         )
         metadata = self._init_kpool_metadata(
             metadata,
@@ -2086,6 +2098,11 @@ class DeepseekSparseAttnBackend(
             q_nope = q_all[:, :, : layer.v_head_dim]
             q_rope = q_all[:, :, layer.v_head_dim :]
 
+        if metadata.qstream_layout is not None:
+            if dsa_impl != "flashmla_sparse_q8" or torch.cuda.get_device_capability(q.device)[0] != 9:
+                raise ValueError("Q-stream supports only SM90 Q8 prefill")
+            return self._forward_glm53_qstream(q_nope, q_rope, topk_indices, layer, metadata)
+
         # NOTE(dark): here, we use page size = 1
         topk_transform_method = self.get_topk_transform_method(
             forward_batch.forward_mode
@@ -2774,6 +2791,34 @@ class DeepseekSparseAttnBackend(
             v_head_dim=layer.v_head_dim,
             layer_id=layer.layer_id,
         )
+
+    def _forward_glm53_qstream(self, q_nope, q_rope, topk, layer, metadata):
+        from sglang.srt.layers.dcp.glm53_qstream import QStreamAttention
+        n, heads, dim = q_nope.shape
+        if dim != 512 or q_rope.shape[-1] != 64 or topk.shape[-1] != 2048:
+            raise ValueError("Q-stream requires GLM MLA dimensions 512+64 and top-k 2048")
+        # Transform on the Q owner while its CP request mapping is available.
+        # dcp_size=1 retains allocator-widened IDs for the receiving KV owner.
+        wide = transform_index_page_table_prefill(
+            page_table=metadata.page_table_1, topk_indices=self._pad_topk_indices(topk,n),
+            extend_lens_cpu=metadata.dsa_extend_seq_lens_list, page_size=1,
+            output_num_tokens=n, cu_seqlens_q=metadata.cu_seqlens_q,
+            dcp_size=1, dcp_rank=0, causal_seq_lens=metadata.dsa_seqlens_expanded)
+        born = self._q8kv8_born_q_stash
+        if born is not None:
+            if born != (n,layer.layer_id):
+                raise RuntimeError("Q-stream born-FP8 Q stash mismatch")
+            self._q8kv8_born_q_stash = None
+            q_fp8 = self._q8kv8_born_q_buf[:n]
+        else:
+            padded = ((heads+63)//64)*64
+            q_fp8 = torch.zeros((n,padded,dim+q_rope.shape[-1]),device=q_nope.device,dtype=torch.float8_e4m3fn)
+            concat_and_cast_q_fp8_pad(q_fp8,q_nope,q_rope,heads)
+        runner = getattr(self,"_glm53_qstream",None)
+        if runner is None:
+            runner = self._glm53_qstream = QStreamAttention(get_parallel().dcp_group)
+        return runner.run(q_fp8,wide,self.token_to_kv_pool.get_key_buffer(layer.layer_id),
+                          metadata.qstream_layout,layer.scaling)[:,:heads]
 
     @_prefill_traced("attention", cuda=True)
     def _forward_flashmla_sparse_q8kv8(

@@ -46,6 +46,7 @@ def prepare_decode_context_parallel_metadata(
     kv_cache_device,
     create_chunked_prefix_cache_kv_indices_fn,
     kv_buffer_token_padding: int = 1,
+    allocate_kv_buffer: bool = True,
 ) -> Optional[DecodeContextParallelMetadata]:
     parallel = get_parallel()
     if not parallel.dcp_enabled:
@@ -124,7 +125,7 @@ def prepare_decode_context_parallel_metadata(
     padded_buffer_tokens = (
         (seq_lens_sum + kv_buffer_token_padding - 1) // kv_buffer_token_padding
     ) * kv_buffer_token_padding
-    dcp_kv_buffer = torch.empty(
+    dcp_kv_buffer = None if not allocate_kv_buffer else torch.empty(
         (
             padded_buffer_tokens,
             *kv_buffer_shape[1:],

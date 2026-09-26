@@ -57,6 +57,16 @@ def check_server_args(server_args: Any):
     if cfg.glm53_dsa_indexer_mode == "compact" and cfg.glm53_dsa_logits_workspace_mib is None:
         raise ValueError("Compact indexer requires an explicit workspace budget")
 
+    if cfg.glm53_dcp_prefill_mode == "q-stream":
+        if not (cfg.enable_prefill_cp and cfg.cp_strategy == "interleave" and cfg.tp_size == 8
+                and cfg.dcp_size == 4 and cfg.ep_size == 8 and cfg.dp_size == cfg.pp_size == 1
+                and cfg.quantization == "w4afp8" and cfg.kv_cache_dtype == "fp8_e4m3"
+                and cfg.dsa_prefill_backend == "flashmla_sparse_q8"):
+            raise ValueError("Q-stream requires GLM W4AFP8 CP8/interleave DCP4 EP8 DP1/PP1 Q8 prefill")
+        from sglang.srt.environ import envs
+        if envs.SGLANG_DSA_FUSE_TOPK.get():
+            raise ValueError("Q-stream requires SGLANG_DSA_FUSE_TOPK=0")
+
     # Check parallel size constraints
     if cfg.ep_join_mode != "scale":
         assert (cfg.tp_size * cfg.pp_size) % cfg.nnodes == 0, (

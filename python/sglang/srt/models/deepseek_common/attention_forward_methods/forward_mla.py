@@ -14,7 +14,7 @@ from sglang.kernels.ops.quantization.fp8_kernel import (
 from sglang.srt.compilation.compilation_config import register_split_op
 from sglang.srt.environ import envs
 from sglang.srt.layers import deep_gemm_wrapper
-from sglang.srt.layers.attention.dsa.utils import is_graph_dsa_split_op_surface
+from sglang.srt.layers.attention.dsa.utils import is_graph_dsa_split_op_surface, dsa_use_prefill_cp
 from sglang.srt.layers.attention.dsa_backend import prepare_kv_for_attention
 from sglang.srt.layers.communicator import get_attn_tp_context
 from sglang.srt.layers.dcp import (
@@ -57,7 +57,7 @@ from sglang.srt.models.deepseek_common.utils import (
     _is_hip,
     _is_musa,
 )
-from sglang.srt.runtime_context import get_exec, get_parallel
+from sglang.srt.runtime_context import get_exec, get_parallel, get_schedule
 from sglang.srt.state_capturer.indexer_topk import (
     maybe_capture_indexer_topk,
 )
@@ -679,7 +679,8 @@ class DeepseekMLAForwardMixin:
                         q_nope_out=q_nope_out,
                         q_pe=q_pe,
                     )
-                else:
+                elif not (self.use_dsa and get_schedule().glm53_dcp_prefill_mode == "q-stream"
+                          and dsa_use_prefill_cp(forward_batch)):
                     all_gather_kv_cache_for_mla_extend(
                         get_token_to_kv_pool(),
                         self.attn_mqa,

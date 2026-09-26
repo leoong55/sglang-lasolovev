@@ -12,7 +12,6 @@ BASE_IMAGE = "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccae
 # Unpatched API boundaries must also match the release before installing.
 GUARDS = (
     "srt/layers/cp/utils.py",
-    "srt/mem_cache/kv_index_translator.py",
     "srt/speculative/draft_worker_common.py",
     "srt/model_executor/runner/decode_cuda_graph_runner.py",
 )

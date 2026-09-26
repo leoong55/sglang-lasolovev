@@ -510,6 +510,15 @@ class KVIndexTranslator:
         hot path can skip the call rather than round-trip a no-op copy."""
         return self.is_translating or get_parallel().attn_dcp_size > 1
 
+    def dcp_read_ownership(self, widened_ids: torch.Tensor) -> torch.Tensor:
+        """Ownership of allocator-widened read IDs, before physical translation.
+
+        The allocator encodes owners in the in-page token offset. Callers must
+        pass the read-table value, never infer an owner from a logical top-k position.
+        """
+        parallel = get_parallel()
+        return (widened_ids >= 0) & (widened_ids.remainder(parallel.attn_dcp_size) == parallel.attn_dcp_rank)
+
     def translate_dcp_read_ids(self, widened_ids: torch.Tensor) -> torch.Tensor:
         """Widened logical READ ids -> kernel-facing ids, for either pool.
 

@@ -3200,7 +3200,9 @@ class DeepseekV2ForCausalLM(nn.Module, DeepseekV2WeightLoaderMixin):
             # FlashMLA reshapes the flat gathered storage into physical pages.
             # Logical DCP indices cover only the valid rows; padding is storage-only.
             kv_buffer_token_padding = token_to_kv_pool.page_size
+        from sglang.srt.runtime_context import get_schedule
         return prepare_decode_context_parallel_metadata(
+            allocate_kv_buffer=not (is_deepseek_dsa(self.config) and get_schedule().glm53_dcp_prefill_mode == "q-stream"),
             seq_lens=seq_lens,
             extend_prefix_lens=extend_prefix_lens,
             extend_prefix_lens_cpu=extend_prefix_lens_cpu,

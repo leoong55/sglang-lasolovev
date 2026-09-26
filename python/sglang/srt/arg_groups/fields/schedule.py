@@ -72,6 +72,9 @@ class Schedule(msgspec.Struct):
     prefill_interleaving_min_continuation_tokens: A[
         Optional[int], "Minimum continuing tokens, aligned to the logical KV page. Adaptive defaults to one page.",
     ] = None
+    glm53_dcp_prefill_mode: A[
+        str, Arg(help="Experimental SM90 GLM CP8/DCP4 prefill communication.", choices=["kv-gather", "q-stream"]),
+    ] = "kv-gather"
     glm53_dsa_indexer_mode: A[
         str, Arg(help="GLM DSA logits layout (SM90, unfused top-k).", choices=["legacy", "compact"]),
     ] = "legacy"
