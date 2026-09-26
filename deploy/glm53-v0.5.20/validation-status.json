@@ -1,0 +1,22 @@
+{
+  "date": "2026-09-26",
+  "base_commit": "fcd40b5f1ac133afaf4cd1aba8f63d3d4c9af57a",
+  "cpu": {
+    "passed": 52,
+    "subtests_passed": 20,
+    "command": "python -m pytest -q deploy/glm53-v0.5.20/tests",
+    "python": "3.11.7",
+    "torch": "2.14.0",
+    "platform": "macOS arm64"
+  },
+  "cuda": {
+    "skipped": 7,
+    "reason": "No CUDA GPUs available on this host",
+    "executed": false
+  },
+  "image_built": false,
+  "model_requests_sent": 0,
+  "performance_validated": false,
+  "oom_headroom_validated": false,
+  "validated_gpu_profile": null
+}

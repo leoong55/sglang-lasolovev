@@ -46,7 +46,7 @@ def test_native_q8_partition_and_token_reduction(empty_rank,graph_on):
     ids=wide[selected]
     if ids.numel()==0: ids=wide.new_tensor([SENTINEL])
     local=keys.new_zeros((ids.numel()+2048,1,576))
-    if selected.numel(): local[:selected.numel()].copy_(keys[selected])
+    if selected.numel(): local[:selected.numel()].copy_(keys.view(torch.uint8)[selected].view(torch.float8_e4m3fn))
     torch.manual_seed(125+rank)
     q=torch.randn(TILE,64,576,device='cuda').to(torch.float8_e4m3fn)
     indices=torch.full((TILE,2048),-1,device='cuda',dtype=torch.int32)

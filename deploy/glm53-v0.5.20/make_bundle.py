@@ -54,6 +54,10 @@ def main():
     provenance = json.loads((source / "provenance.json").read_text())
     provenance.update(source_commit=git("rev-parse", "HEAD").decode().strip(), source_tree=git("rev-parse", "HEAD^{tree}").decode().strip())
     (output / "REVISION.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    series_base = provenance.get("prefill_series_base")
+    if series_base:
+        (output / "prefill-series.mbox").write_bytes(git("format-patch", "--stdout", "--binary", f"{series_base}..HEAD"))
+        (output / "prefill-series-history.txt").write_bytes(git("log", "--reverse", "--format=%H %s", f"{series_base}..HEAD"))
     shutil.copy2(repo / "LICENSE", output / "LICENSE")
     (output / "SHA256SUMS").write_text("".join(f"{digest(p.read_bytes())}  {p.relative_to(output)}\n" for p in sorted(output.rglob("*")) if p.is_file()))
     with tarfile.open(archive, "w:gz") as tar:

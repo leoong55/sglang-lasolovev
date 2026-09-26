@@ -1,0 +1,42 @@
+{
+  "base_commit": "fcd40b5f1ac133afaf4cd1aba8f63d3d4c9af57a",
+  "commits": [
+    {
+      "commit": "c1fa2467345164ce5f107e11d23564c9ed4c0f99",
+      "title": "P0: add opt-in prefill admission and asynchronous stage diagnostics [skip ci]"
+    },
+    {
+      "commit": "f5aa60db319f8d16d7b6cc81aef9fffbdbb388d4",
+      "title": "P1: establish explicit 16k control profile and pre-readiness warmup [skip ci]"
+    },
+    {
+      "commit": "eafeb8e0bbf43c0fea38ac1b3b35927b5d3b72fb",
+      "title": "P2: interleave complete prefills with bounded continuation debt [skip ci]"
+    },
+    {
+      "commit": "3b747af20c97c01b81e982b05a7b0bd87824a3cb",
+      "title": "P3: bound aligned logits workspace and add compact request-relative indexer [skip ci]"
+    },
+    {
+      "commit": "146214dbfcd9a94c60ea3bdea85fbed682441fa8",
+      "title": "P4: add experimental sharded-KV Q-stream prefill with token LSE reduction [skip ci]"
+    },
+    {
+      "commit": "6ffd52a16a39f8b940c13f210d7d1791b1174112",
+      "title": "P5: pipeline HiCache readiness snapshots on a dedicated CPU group [skip ci]"
+    },
+    {
+      "commit": "f1956d0a1b4463aa0d9d5d7e6713bac88bba1101",
+      "title": "P6: add 4k and 12k buckets and capture fixed Q-stream tiles [skip ci]"
+    },
+    {
+      "commit": "0f89f029c3c54024348b565b8949e55f85913d4d",
+      "title": "Fix migrated CP imports and DFlash diagnostics; update SSE regression fixtures [skip ci]"
+    },
+    {
+      "commit": "9eac4bc21ec6c815399fa7740deae3115454fbc9",
+      "title": "Validate prefill runtime contracts, normalize Q8 LSE and compact shard top-k [skip ci]"
+    }
+  ],
+  "note": "Core runtime series and integration repairs; packaging commits follow in Git history"
+}

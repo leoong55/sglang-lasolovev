@@ -1,5 +1,8 @@
 # Реестр переноса на 0.5.20
 
+Последующая серия prefill 16k: [PREFILL16K.md](PREFILL16K.md). Ниже — решения
+при исходном переносе; расширение buckets и новые переключатели описаны там.
+
 Upstream: [v0.5.20](https://github.com/sgl-project/sglang/releases/tag/v0.5.20),
 commit `94602c9c2b7cbdb8efd5c52802dac6a1c180089e`.
 Наш предыдущий runtime: `219206f7db9f7ffb24dad2605edf72af62d4939e` поверх

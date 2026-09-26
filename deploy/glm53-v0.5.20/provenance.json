@@ -15,5 +15,9 @@
   "image_built_here": false,
   "runtime_tests_run": false,
   "gpu_validated": false,
-  "status": "prepared source; awaiting separate build and validation"
+  "status": "prefill 16k implementation and CPU validation; awaiting image/GPU validation",
+  "prefill_series_base": "fcd40b5f1ac133afaf4cd1aba8f63d3d4c9af57a",
+  "prefill_series": "P0-P6",
+  "cpu_tests_run": true,
+  "validated_profile": null
 }
