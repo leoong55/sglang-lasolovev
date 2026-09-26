@@ -2232,7 +2232,11 @@ class KVCacheConfigurator:
             is_multimodal=self.model_config.is_multimodal,
             mm_feature_transport=get_mm().mm_feature_transport,
         )
-        rest_memory = available_gpu_memory - slack_gb - mm_reservation_gb
+        from sglang.srt.layers.attention.dsa.glm53_logits import workspace_reservation_bytes
+        logits_reservation_gb = workspace_reservation_bytes(
+            get_schedule().glm53_dsa_logits_workspace_mib, is_draft=self.is_draft_worker
+        ) / (1 << 30)
+        rest_memory = available_gpu_memory - slack_gb - mm_reservation_gb - logits_reservation_gb
         if self.mambaish_config is not None:
             rest_memory = self._handle_max_mamba_cache(rest_memory)
 

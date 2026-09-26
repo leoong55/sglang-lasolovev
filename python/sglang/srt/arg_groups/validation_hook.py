@@ -52,6 +52,11 @@ def check_server_args(server_args: Any):
         if minimum is not None and (minimum <= 0 or minimum % logical_page or minimum > cfg.chunked_prefill_size):
             raise ValueError("Continuation minimum must be a positive logical-page multiple within the chunk")
 
+    if cfg.glm53_dsa_logits_workspace_mib is not None and cfg.glm53_dsa_logits_workspace_mib <= 0:
+        raise ValueError("DSA workspace must be positive")
+    if cfg.glm53_dsa_indexer_mode == "compact" and cfg.glm53_dsa_logits_workspace_mib is None:
+        raise ValueError("Compact indexer requires an explicit workspace budget")
+
     # Check parallel size constraints
     if cfg.ep_join_mode != "scale":
         assert (cfg.tp_size * cfg.pp_size) % cfg.nnodes == 0, (

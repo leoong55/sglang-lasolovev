@@ -72,6 +72,12 @@ class Schedule(msgspec.Struct):
     prefill_interleaving_min_continuation_tokens: A[
         Optional[int], "Minimum continuing tokens, aligned to the logical KV page. Adaptive defaults to one page.",
     ] = None
+    glm53_dsa_indexer_mode: A[
+        str, Arg(help="GLM DSA logits layout (SM90, unfused top-k).", choices=["legacy", "compact"]),
+    ] = "legacy"
+    glm53_dsa_logits_workspace_mib: A[
+        Optional[int], "Explicit DSA logits budget in MiB, reserved before KV allocation; overrides the free-memory fraction.",
+    ] = None
     prefill_decode_interval: A[
         Optional[int],
         Arg(

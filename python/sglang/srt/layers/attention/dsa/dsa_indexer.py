@@ -992,6 +992,9 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
         return topk_result
 
     def _get_mqa_logits_budget_bytes(self, device_index: int) -> int:
+        explicit = get_schedule().glm53_dsa_logits_workspace_mib
+        if explicit is not None:
+            return explicit * (1 << 20)
         free_mem_fraction = self._mqa_logits_free_mem_fraction()
         cached_budget = self._mqa_logits_budget_bytes.get(device_index)
         if cached_budget is not None:
@@ -1144,6 +1147,38 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
         token_to_batch_idx = metadata.get_token_to_batch_idx()
         q_offset = ks.shape[0]
         k_offset = k_fp8.shape[0]
+        compact = get_schedule().glm53_dsa_indexer_mode == "compact"
+        explicit_budget = get_schedule().glm53_dsa_logits_workspace_mib
+        if compact or explicit_budget is not None:
+            if _is_hip or _is_xpu or torch.cuda.get_device_capability(device)[0] != 9:
+                raise ValueError("Explicit GLM logits layout currently requires SM90")
+            if envs.SGLANG_DSA_FUSE_TOPK.get():
+                raise ValueError("Explicit GLM logits layout requires SGLANG_DSA_FUSE_TOPK=0")
+            from sglang.srt.layers.attention.dsa.glm53_logits import balanced_tiles, logits_stride
+            from sglang.srt.observability.glm53_prefill import record, stage
+            width = max_seq_len if compact else k_offset
+            budget = self._get_mqa_logits_budget_bytes(device_index)
+            tiles = balanced_tiles(q_offset, width, budget, compact=compact)
+            record("indexer", q_rows=q_offset, kv_rows=k_offset, logits_width=width,
+                   logits_stride=logits_stride(width, compact=compact), workspace_bytes=budget,
+                   rows_per_launch=max((b-a for a,b in tiles), default=0), launches=len(tiles))
+            for start, end in tiles:
+                qp, wp, _ = self._pad_heads_for_deep_gemm(q_fp8[start:end], weights[start:end])
+                with self._with_real_sm_count():
+                    logits = deep_gemm.fp8_mqa_logits(
+                        qp, kv_fp8, wp, ks[start:end], ke[start:end],
+                        clean_logits=False, max_seqlen_k=width if compact else 0,
+                    )
+                starts = None if compact else ks[start:end]
+                lengths = seq_lens_expanded[start:end]
+                self._mask_init_and_local_tokens(logits, lengths, starts)
+                with stage("topk"):
+                    # Both layouts return request-relative positions. Mapping to
+                    # CP/DCP physical KV remains exclusively the attention backend's job.
+                    topk_result[start:end] = metadata.topk_backend.topk_func(
+                        logits, lengths, self.index_topk, row_starts=starts)
+                del logits  # do not keep the preceding workspace live across the next allocation
+            return topk_result
         need_chunk, logits_budget_bytes = self._should_chunk_mqa_logits(
             q_offset, k_offset, device_index
         )

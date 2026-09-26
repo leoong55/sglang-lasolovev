@@ -108,10 +108,14 @@ def compute_post_capture_kv_resize(
         ),
         default=0,
     )
+    from sglang.srt.layers.attention.dsa.glm53_logits import workspace_reservation_bytes
+    from sglang.srt.runtime_context import get_schedule
+    logits_reservation = workspace_reservation_bytes(get_schedule().glm53_dsa_logits_workspace_mib)
     budget_bytes = (
         int(max(0.0, free_gb - headroom_gb - mm_reservation_gb) * (1 << 30))
         + pool.post_capture_backed_bytes
         - canary_workspace_bytes
+        - logits_reservation
     )
     config = model_runner.kv_cache_configurator.config_from_budget(
         budget_bytes, cap_tokens=model_runner.max_total_num_tokens
