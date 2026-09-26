@@ -29,6 +29,7 @@ class W4AFp8HummingMoEMethod(W4AFp8MoEMethod):
         from importlib.metadata import version
 
         from sglang.srt.layers.moe import MoeRunner, MoeRunnerBackend
+        from sglang.srt.environ import envs
         from sglang.srt.layers.moe.utils import get_moe_a2a_backend
         from sglang.srt.layers.quantization.humming import _lazy_import_humming
 
@@ -70,6 +71,9 @@ class W4AFp8HummingMoEMethod(W4AFp8MoEMethod):
         if ep_aware not in ("0", "1"):
             raise ValueError("SGLANG_GLM53_HUMMING_EP_AWARE must be 0 or 1")
         layer._humming_standard_ep_aware = ep_aware == "1"
+        layer._humming_disable_stream_k = (
+            envs.SGLANG_GLM53_HUMMING_DISABLE_STREAM_K.get()
+        )
         self.runner = MoeRunner(MoeRunnerBackend.HUMMING, moe_runner_config)
         # The standard fused wrapper creates a temporary HummingRunnerCore on
         # every invocation. Keep this runner alive for torch.compile custom-op

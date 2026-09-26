@@ -1,0 +1,145 @@
+{
+  "status": "diagnostic_complete_not_acceptance",
+  "runtime_source": "0b3735e42",
+  "cases_per_rank": 32,
+  "ranks": 8,
+  "modes": [
+    {
+      "mode": "native_changed_routes",
+      "cases": 64,
+      "strict_pass": {
+        "eager_eager": 33,
+        "graph_graph": 33,
+        "graph_eager": 33
+      },
+      "max_graph_eager_relative_l2": 0.010518347844481468,
+      "max_fp32_reference_l2": 0.04355420917272568,
+      "max_graph_eager_absolute_error": 0.14453125
+    },
+    {
+      "mode": "native_same_routes",
+      "cases": 64,
+      "strict_pass": {
+        "eager_eager": 33,
+        "graph_graph": 33,
+        "graph_eager": 33
+      },
+      "max_graph_eager_relative_l2": 0.010727797634899616,
+      "max_fp32_reference_l2": 0.043558429926633835,
+      "max_graph_eager_absolute_error": 0.140625
+    },
+    {
+      "mode": "frozen_sort",
+      "cases": 64,
+      "strict_pass": {
+        "eager_eager": 57,
+        "graph_graph": 57,
+        "graph_eager": 57
+      },
+      "max_graph_eager_relative_l2": 0.0029355334118008614,
+      "max_fp32_reference_l2": 0.04356149211525917,
+      "max_graph_eager_absolute_error": 0.1640625
+    },
+    {
+      "mode": "streamk_off",
+      "cases": 64,
+      "strict_pass": {
+        "eager_eager": 64,
+        "graph_graph": 64,
+        "graph_eager": 64
+      },
+      "max_graph_eager_relative_l2": 0.0,
+      "max_fp32_reference_l2": 0.04350181668996811,
+      "max_graph_eager_absolute_error": 0.0
+    }
+  ],
+  "timings": [
+    {
+      "rows": 2048,
+      "concentrated": false,
+      "layout": "identity",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 0.4608736038208008,
+        "streamk_off": 0.4544352054595947
+      },
+      "latency_change_percent": -1.3969987232572145
+    },
+    {
+      "rows": 2048,
+      "concentrated": false,
+      "layout": "fixed",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 0.461078405380249,
+        "streamk_off": 0.45545282363891604
+      },
+      "latency_change_percent": -1.2200922176551776
+    },
+    {
+      "rows": 2048,
+      "concentrated": true,
+      "layout": "identity",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 1.8963071823120117,
+        "streamk_off": 1.9291807174682618
+      },
+      "latency_change_percent": 1.7335553787319435
+    },
+    {
+      "rows": 2048,
+      "concentrated": true,
+      "layout": "fixed",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 0.5784607887268066,
+        "streamk_off": 0.5974592208862305
+      },
+      "latency_change_percent": 3.284307688553878
+    },
+    {
+      "rows": 16384,
+      "concentrated": false,
+      "layout": "identity",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 2.688262367248535,
+        "streamk_off": 2.5564607620239257
+      },
+      "latency_change_percent": -4.902854975405901
+    },
+    {
+      "rows": 16384,
+      "concentrated": false,
+      "layout": "fixed",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 2.6312448501586916,
+        "streamk_off": 2.4779296875
+      },
+      "latency_change_percent": -5.82671592305235
+    },
+    {
+      "rows": 16384,
+      "concentrated": true,
+      "layout": "identity",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 13.613836669921875,
+        "streamk_off": 12.742441558837891
+      },
+      "latency_change_percent": -6.400804800378035
+    },
+    {
+      "rows": 16384,
+      "concentrated": true,
+      "layout": "fixed",
+      "rank_max_mean_graph_ms": {
+        "native_same_routes": 4.050681686401367,
+        "streamk_off": 3.7860958099365236
+      },
+      "latency_change_percent": -6.531885172638729
+    }
+  ],
+  "conclusion": "Native eager and graph both vary. Fixed sort partially helps; disabling Stream-K gives bitwise identical repeats across64cases. This localizes variation to Stream-K partial arithmetic, influenced by route order, rather than CUDA-graph metadata alone.",
+  "limitations": [
+    "One real layer3, synthetic hidden states and two routing distributions",
+    "Ten replay timings per point, not repeated full-model performance",
+    "No attention/KV/DFlash or full-model numerical acceptance",
+    "Fixed-sort uses immutable routes only as diagnostic; not a serving implementation"
+  ]
+}

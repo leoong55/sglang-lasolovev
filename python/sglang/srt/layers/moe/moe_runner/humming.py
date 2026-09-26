@@ -183,6 +183,17 @@ class HummingRunnerCore(MoeRunnerCore):
             gemm_type=humming_gemm_type,
             sublayer_name="w2",
         )
+        if getattr(self.layer, "_humming_disable_stream_k", False):
+            # Preserve every shape/tile choice; only remove cross-CTA partial
+            # reductions. Copy each entry so shared Humming defaults stay intact.
+            w13_tuning_config = [
+                (low, high, {**config, "use_stream_k": False})
+                for low, high, config in w13_tuning_config
+            ]
+            w2_tuning_config = [
+                (low, high, {**config, "use_stream_k": False})
+                for low, high, config in w2_tuning_config
+            ]
         self.humming_gemm_configs[humming_gemm_type.value] = {
             "compute_config": compute_config,
             "w13_tuning_config": w13_tuning_config,
