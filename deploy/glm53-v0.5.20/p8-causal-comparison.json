@@ -1,0 +1,49 @@
+{
+  "reference": "p6buckets-profile",
+  "candidate": "p8-expertlayout-profile",
+  "matched_collectives_per_rank": 150,
+  "ranks": 8,
+  "reference_summary": {
+    "start_skew_ms": 1.8595522460937501,
+    "end_skew_ms": 0.1169287109375,
+    "min_rs_ms": 0.5349109999999999,
+    "max_rs_ms": 2.333734,
+    "late_humming_ms": 2.8951405,
+    "early_humming_ms": 1.1032404999999998,
+    "max_humming_ms": 2.8951405,
+    "min_humming_ms": 1.1032404999999998,
+    "sum_max_humming_ms": 464.030484,
+    "late_ranks": {
+      "0": 26,
+      "2": 17,
+      "6": 37,
+      "3": 22,
+      "1": 16,
+      "4": 10,
+      "7": 15,
+      "5": 7
+    }
+  },
+  "candidate_summary": {
+    "start_skew_ms": 0.3339697265625,
+    "end_skew_ms": 0.09903564453125,
+    "min_rs_ms": 0.5339015,
+    "max_rs_ms": 0.8176325,
+    "late_humming_ms": 1.974653,
+    "early_humming_ms": 1.6525880000000002,
+    "max_humming_ms": 1.974653,
+    "min_humming_ms": 1.6525880000000002,
+    "sum_max_humming_ms": 301.381446,
+    "late_ranks": {
+      "2": 16,
+      "0": 18,
+      "3": 15,
+      "1": 25,
+      "7": 20,
+      "6": 19,
+      "4": 18,
+      "5": 19
+    }
+  },
+  "limits": "Same two profiled steps/seed. Ordered kernel matching, not fullTTFT decomposition. Full-model numerical gate unresolved."
+}

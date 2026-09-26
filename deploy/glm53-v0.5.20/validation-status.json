@@ -44,7 +44,7 @@
     }
   },
   "image_built": false,
-  "model_requests_sent": 3853,
+  "model_requests_sent": 4486,
   "performance_validated": false,
   "oom_headroom_validated": false,
   "validated_gpu_profile": null,
@@ -58,7 +58,7 @@
     "P5_on_P3": 627,
     "P6graph_on_P4": 627,
     "P6buckets_on_P2": 627,
-    "P8": "allocated8H200;48CUDAroutercasespassed;modelinitializing"
+    "P8": "627performance requests complete;0errors; firstoutputID3/3equal,top20notexact"
   },
   "server_startup_previous_hicache96": {
     "status": "blocked_host_ram_before_readiness",
@@ -76,20 +76,21 @@
     "dcp_logical_tokens": 2400000
   },
   "performance_measurements_available": true,
-  "performance_requests": 3762,
+  "performance_requests": 4389,
   "performance_request_errors": 0,
   "additional_cache_diagnostic_requests": 78,
-  "smoke_requests": 8,
+  "smoke_requests": 10,
   "model_request_count_scope": "External campaign clients only; excludes internal startup warmup and health requests",
   "remaining": [
-    "P8 model generation, matched reference comparison and627-request performance workload",
+    "EP8 real-weight fixed-layout arithmetic gate (prepared)",
     "Full-model numerical repeatability/cache correctness remains inconclusive",
-    "P8 causal profile, final report/profile acceptance and verified GPU cleanup"
+    "Final profile/report acceptance and verified GPU cleanup"
   ],
   "cleanup_blocker": null,
-  "profiling_requests": 2,
+  "profiling_requests": 3,
   "performance_acceptance": {
-    "P6buckets": "Continuous short-only p95 2.441 to1.432s vsP2; three paired seeds. Fresh/mixed nearly unchanged. Full cache tensor parity still inconclusive."
+    "P6buckets": "Continuous short-only p95 2.441 to1.432s vsP2; three paired seeds. Fresh/mixed nearly unchanged. Full cache tensor parity still inconclusive.",
+    "P8": "FreshTTFT5.049s vsP2 5.741(-12.1%);mixedshortp954.182vs4.916(-14.9%).Constantshort1.526vsP6buckets1.432(+6.6%).Notaccepted; numericalparityunresolved."
   },
   "expert_calibration_requests": 3,
   "cache_matched_diagnostic": {
@@ -98,5 +99,6 @@
     "max_shared_logprob_difference_before_host_eviction": 0.6795616149902344,
     "host_reload_difference": 0.44080352783203125,
     "result": "inconclusive; no tolerances relaxed"
-  }
+  },
+  "model_reference_requests": 3
 }

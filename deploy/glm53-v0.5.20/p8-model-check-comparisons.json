@@ -1,0 +1,23 @@
+[
+  {
+    "seed": 546620,
+    "first_output_id_equal": true,
+    "top20_exact": false,
+    "shared_top_tokens": 19,
+    "max_abs_shared_logprob_difference": 0.41533708572387695
+  },
+  {
+    "seed": 547620,
+    "first_output_id_equal": true,
+    "top20_exact": false,
+    "shared_top_tokens": 15,
+    "max_abs_shared_logprob_difference": 0.4633808135986328
+  },
+  {
+    "seed": 548620,
+    "first_output_id_equal": true,
+    "top20_exact": false,
+    "shared_top_tokens": 13,
+    "max_abs_shared_logprob_difference": 0.388730525970459
+  }
+]
