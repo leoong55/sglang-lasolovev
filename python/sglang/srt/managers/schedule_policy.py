@@ -223,6 +223,7 @@ class CacheAwarePolicy(Enum):
     LPM = "lpm"  # longest prefix match
     DFS_WEIGHT = "dfs-weight"  # depth-first search weighting
     HRRN = "hrrn"  # highest response ratio next, token-based aging
+    SHORTEST_PREFILL_FIRST = "shortest-prefill-first"
 
 
 class CacheAgnosticPolicy(Enum):
@@ -292,6 +293,12 @@ class SchedulePolicy:
                 )
             elif policy == CacheAwarePolicy.DFS_WEIGHT:
                 SchedulePolicy._sort_by_dfs_weight(waiting_queue, self.tree_cache)
+            elif policy == CacheAwarePolicy.SHORTEST_PREFILL_FIRST:
+                waiting_queue.sort(key=lambda r: (
+                    r.rid in temporary_deprioritized,
+                    max(1, len(r.origin_input_ids) + len(r.output_ids) - r.num_matched_prefix_tokens),
+                    r.time_stats.wait_queue_entry_time,
+                ))
             elif policy == CacheAwarePolicy.HRRN:
                 SchedulePolicy._sort_by_hrrn(
                     waiting_queue, temporary_deprioritized, processed_tokens
@@ -317,7 +324,8 @@ class SchedulePolicy:
 
     def _determine_active_policy(self, waiting_queue: List[Req]) -> Policy:
         if (
-            self.policy
+            not get_schedule().prefill_interleaving
+            and self.policy
             in (
                 CacheAwarePolicy.LPM,
                 CacheAwarePolicy.HRRN,
@@ -429,7 +437,7 @@ class SchedulePolicy:
     def _uncached_len(r: Req) -> int:
         """Number of tokens that must actually be prefilled for this req
         (all cache levels — device + host via hicache — counted as cached)."""
-        return max(0, len(r.origin_input_ids) - r.num_matched_prefix_tokens)
+        return max(0, len(r.origin_input_ids) + len(r.output_ids) - r.num_matched_prefix_tokens)
 
     @staticmethod
     def _sort_by_hrrn(
@@ -602,6 +610,8 @@ class PrefillAdder:
         self.can_run_list = []
         self.preempt_list = []
         self.new_chunked_req = None
+        self.chunked_req_limit = None
+        self.prefill_interleaving = False
         self.log_hit_tokens = 0
         self.reprocessed_log_hit_tokens = 0
         self.log_device_hit_tokens = 0
@@ -1162,6 +1172,8 @@ class PrefillAdder:
                 waiting_queue_len=self.waiting_queue_len,
             )
 
+        if self.chunked_req_limit is not None:
+            _rem_tokens = min(_rem_tokens, self.chunked_req_limit)
         cand_extend_input_len = len(req.full_untruncated_fill_ids) - len(
             req.prefix_indices
         )
@@ -1381,6 +1393,7 @@ class PrefillAdder:
                 host_hit_length=req.host_hit_length,
                 swa_host_hit_length=req.swa_host_hit_length,
                 truncation_align_size=truncation_align_size,
+                has_chunked_req=has_chunked_req,
             )
             if isinstance(admission, AddReqResult):
                 return admission
@@ -1444,6 +1457,7 @@ class PrefillAdder:
                         host_hit_length=0,
                         swa_host_hit_length=0,
                         truncation_align_size=truncation_align_size,
+                        has_chunked_req=has_chunked_req,
                     )
                     if isinstance(admission, AddReqResult):
                         return admission
@@ -1464,6 +1478,7 @@ class PrefillAdder:
         host_hit_length: int,
         swa_host_hit_length: int,
         truncation_align_size: Optional[int],
+        has_chunked_req: bool = False,
     ) -> _PrefillAdmission | AddReqResult:
         """Select a prefill shape without allocating or publishing cached KV."""
         if total_tokens >= self.rem_total_tokens:
@@ -1508,6 +1523,10 @@ class PrefillAdder:
                 return AddReqResult.OTHER
             max_new_tokens = 0
         elif chunk_tokens_limit is not None and chunk_fit_tokens > chunk_tokens_limit:
+            if self.prefill_interleaving and (has_chunked_req or self.new_chunked_req is not None):
+                from sglang.srt.observability.glm53_prefill import reject
+                reject("partial_prefill")
+                return AddReqResult.OTHER
             if self.exact_chunk_fill:
                 # Take the remainder verbatim so the batch hits exactly
                 # chunked_prefill_size. `chunk_fit_tokens > chunk_tokens_limit`

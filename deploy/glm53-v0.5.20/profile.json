@@ -1,6 +1,6 @@
 {
   "upstream": "v0.5.20",
-  "status": "16k control profile; CPU validated, GPU validation required",
+  "status": "16k adaptive candidate; GPU validation required",
   "argv": [
     "--host",
     "0.0.0.0",
@@ -112,7 +112,12 @@
     "--weight-version",
     "glm53-v0.5.20-prefill16k-control",
     "--min-free-slots-delay",
-    "1"
+    "1",
+    "--schedule-policy",
+    "hrrn",
+    "--prefill-interleaving",
+    "--prefill-interleaving-mode",
+    "adaptive"
   ],
   "env": {
     "SGLANG_DSA_MQA_LOGITS_FREE_MEM_FRACTION": "0.05",

@@ -40,6 +40,18 @@ def check_server_args(server_args: Any):
 
     cfg = resolving_view(server_args)
 
+    if cfg.prefill_interleaving or cfg.schedule_policy == "shortest-prefill-first":
+        if cfg.schedule_policy not in ("hrrn", "shortest-prefill-first") or cfg.disable_radix_cache:
+            raise ValueError("Prefill interleaving requires HRRN/shortest-prefill-first and prefix caching")
+        if cfg.pp_size != 1 or cfg.dp_size != 1 or cfg.disaggregation_mode != "null":
+            raise ValueError("Prefill interleaving currently requires colocated DP1/PP1")
+        if not cfg.chunked_prefill_size or cfg.chunked_prefill_size <= 0 or cfg.enable_dynamic_chunking:
+            raise ValueError("Prefill interleaving requires a fixed positive chunk budget")
+        minimum = cfg.prefill_interleaving_min_continuation_tokens
+        logical_page = cfg.page_size * cfg.dcp_size
+        if minimum is not None and (minimum <= 0 or minimum % logical_page or minimum > cfg.chunked_prefill_size):
+            raise ValueError("Continuation minimum must be a positive logical-page multiple within the chunk")
+
     # Check parallel size constraints
     if cfg.ep_join_mode != "scale":
         assert (cfg.tp_size * cfg.pp_size) % cfg.nnodes == 0, (

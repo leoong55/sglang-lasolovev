@@ -9,6 +9,8 @@ how config is shaped at runtime.
 
 from __future__ import annotations
 
+import argparse
+
 from typing import (
     List,
     Optional,
@@ -60,6 +62,16 @@ class Schedule(msgspec.Struct):
         Optional[int],
         "The maximum number of tokens in a chunk for the chunked prefill. Setting this to -1 means disabling chunked prefill.",
     ] = None
+    prefill_interleaving: A[
+        Optional[bool], Arg(help="Interleave complete waiting prefills with one continuation.",
+                            action=argparse.BooleanOptionalAction),
+    ] = None
+    prefill_interleaving_mode: A[
+        str, Arg(help="Continuation allocation policy.", choices=["upstream", "adaptive"]),
+    ] = "upstream"
+    prefill_interleaving_min_continuation_tokens: A[
+        Optional[int], "Minimum continuing tokens, aligned to the logical KV page. Adaptive defaults to one page.",
+    ] = None
     prefill_decode_interval: A[
         Optional[int],
         Arg(
@@ -99,6 +111,7 @@ class Schedule(msgspec.Struct):
                 "priority",
                 "routing-key",
                 "hrrn",
+                "shortest-prefill-first",
             ],
         ),
     ] = "fcfs"

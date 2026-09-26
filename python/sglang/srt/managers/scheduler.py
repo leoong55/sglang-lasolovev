@@ -1382,6 +1382,11 @@ class Scheduler(
         )
 
     def init_schedule_policy(self):
+        from sglang.srt.managers.prefill_interleaving import PrefillInterleaver
+        self.prefill_interleaver = PrefillInterleaver()
+        self.prefill_interleaving = get_schedule().prefill_interleaving
+        if self.prefill_interleaving is None:
+            self.prefill_interleaving = self.schedule_policy == "shortest-prefill-first"
         # Init schedule policy and new token estimation
         self.policy = SchedulePolicy(
             self.schedule_policy,
@@ -3776,7 +3781,7 @@ class Scheduler(
             for req in ready_grammar_requests:
                 self._add_request_to_queue(req)
 
-        if self.enable_priority_preemption or self.is_hybrid_swa:
+        if self.enable_priority_preemption or self.is_hybrid_swa or self.prefill_interleaving:
             # Reset batch_is_full to try preemption with a prefill adder.
             running_batch.batch_is_full = False
 
@@ -3864,7 +3869,37 @@ class Scheduler(
             prefill_tile_block_m=prefill_tile_block_m,
         )
 
+        adder.prefill_interleaving = self.prefill_interleaving
         continuing_req = self.chunked_req
+        interleave_plan = None
+        if continuing_req is None:
+            self.prefill_interleaver.reset()
+        elif self.prefill_interleaving:
+            from sglang.srt.managers.prefill_interleaving import Candidate
+            from sglang.srt.managers.schedule_policy import CLIP_MAX_NEW_TOKENS
+            remaining = len(continuing_req.full_untruncated_fill_ids) - len(continuing_req.prefix_indices)
+            slots = self.get_num_allocatable_reqs(running_bs, running_batch=running_batch) - 1
+            if get_schedule().prefill_max_requests is not None:
+                slots = min(slots, get_schedule().prefill_max_requests - 1)
+            candidates = []
+            for r in self.waiting_queue[:128]:
+                if r.beam_group is not None:
+                    continue
+                total = len(r.origin_input_ids) + len(r.output_ids)
+                work = max(1, total - r.num_matched_prefix_tokens)
+                memory = total - len(r.prefix_indices) + min(max(r.sampling_params.max_new_tokens - len(r.output_ids), 0), CLIP_MAX_NEW_TOKENS) + self.page_size
+                candidates.append(Candidate(r, work, memory))
+            interleave_plan = self.prefill_interleaver.plan(
+                continuing_req, candidates, remaining=remaining,
+                budget=adder.rem_chunk_tokens, page=self.page_size, slots=slots,
+                kv_budget=adder.rem_total_tokens,
+                minimum=get_schedule().prefill_interleaving_min_continuation_tokens,
+                adaptive=get_schedule().prefill_interleaving_mode == "adaptive",
+                shortest_first=self.schedule_policy == "shortest-prefill-first",
+            )
+            adder.chunked_req_limit = interleave_plan.limit
+            selected_ids = {id(r) for r in interleave_plan.selected}
+            self.waiting_queue = list(interleave_plan.selected) + [r for r in self.waiting_queue if id(r) not in selected_ids]
         if self.chunked_req is not None:
             self.chunked_req.init_next_round_input()
             self.chunked_req = adder.add_chunked_req(self.chunked_req)
@@ -3887,7 +3922,9 @@ class Scheduler(
             mamba_allocator.alloc_group_begin(len(self.waiting_queue))
         buffer_pipeline = self.tree_cache.buffer_pipeline
         # Get requests from the waiting queue to a new prefill batch
-        for req in self.waiting_queue:
+        for candidate_index, req in enumerate(self.waiting_queue):
+            if self.prefill_interleaving and candidate_index >= 128:
+                break
             if self.enable_lora and not self.can_schedule_lora_req(req, running_loras):
                 continue
 
@@ -3983,7 +4020,22 @@ class Scheduler(
                             req.kv.mamba_pool_idx.unsqueeze(-1)
                         )
                         req.kv.mamba_pool_idx = None
+                if self.prefill_interleaving and not added and adder.rem_chunk_tokens and not running_batch.batch_is_full:
+                    continue
+                # A KV refusal for this request must not hide a fitting waiter.
+                if self.prefill_interleaving and not added and res == AddReqResult.NO_TOKEN and adder.rem_chunk_tokens:
+                    running_batch.batch_is_full = False
+                    continue
                 break
+
+        if continuing_req is not None and interleave_plan is not None:
+            self.prefill_interleaver.settle(
+                continuing_req, actual_tokens=continuing_req.extend_range.length,
+                target=interleave_plan.target, finished=self.chunked_req is None,
+                contended=bool(interleave_plan.selected),
+            )
+            diag.record("interleaving", continuation_tokens=continuing_req.extend_range.length,
+                        debt_tokens=self.prefill_interleaver.debt, borrowed=interleave_plan.borrowed)
 
         if mamba_allocator is not None:
             mamba_allocator.alloc_group_end()
