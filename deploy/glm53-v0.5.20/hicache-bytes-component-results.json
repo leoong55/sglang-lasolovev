@@ -1,0 +1,225 @@
+{
+  "cases": [
+    {
+      "dcp_rank": 0,
+      "sparse_indexer": false,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1241088,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 0,
+      "sparse_indexer": false,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3723264,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 0,
+      "sparse_indexer": false,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 19857408,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 0,
+      "sparse_indexer": true,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1139712,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 0,
+      "sparse_indexer": true,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3419136,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 0,
+      "sparse_indexer": true,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 18235392,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 1,
+      "sparse_indexer": false,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1241088,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 1,
+      "sparse_indexer": false,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3723264,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 1,
+      "sparse_indexer": false,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 19857408,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 1,
+      "sparse_indexer": true,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1139712,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 1,
+      "sparse_indexer": true,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3419136,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 1,
+      "sparse_indexer": true,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 18235392,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 2,
+      "sparse_indexer": false,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1241088,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 2,
+      "sparse_indexer": false,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3723264,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 2,
+      "sparse_indexer": false,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 19857408,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 2,
+      "sparse_indexer": true,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1139712,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 2,
+      "sparse_indexer": true,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3419136,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 2,
+      "sparse_indexer": true,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 18235392,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 3,
+      "sparse_indexer": false,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1241088,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 3,
+      "sparse_indexer": false,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3723264,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 3,
+      "sparse_indexer": false,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 19857408,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 3,
+      "sparse_indexer": true,
+      "logical_pages": 1,
+      "logical_tokens": 256,
+      "roundtrip_bytes": 1139712,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 3,
+      "sparse_indexer": true,
+      "logical_pages": 3,
+      "logical_tokens": 768,
+      "roundtrip_bytes": 3419136,
+      "exact_bytes": true,
+      "untouched_rows": true
+    },
+    {
+      "dcp_rank": 3,
+      "sparse_indexer": true,
+      "logical_pages": 16,
+      "logical_tokens": 4096,
+      "roundtrip_bytes": 18235392,
+      "exact_bytes": true,
+      "untouched_rows": true
+    }
+  ],
+  "passed": 24,
+  "elapsed_s": 27.2225022315979,
+  "gpu": "NVIDIA H200",
+  "torch": "2.13.0+cu130",
+  "scope": "Actual pool DMA, local DCP mapping and replicated sidecars; not full-model or consensus parity"
+}

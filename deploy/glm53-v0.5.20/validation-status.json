@@ -7,7 +7,13 @@
     "command": "python -m pytest -q deploy/glm53-v0.5.20/tests",
     "python": "3.11.7",
     "torch": "2.14.0",
-    "platform": "macOS arm64"
+    "platform": "macOS arm64",
+    "fixed_expert_placement_regression": {
+      "tests_passed": 2,
+      "source_commit": "1b99488b8",
+      "both_fail_on_unpatched_source": true,
+      "scope": "normal forward CPU stand-ins and dual-stream dispatch control flow; not GPU arithmetic"
+    }
   },
   "cuda": {
     "executed": true,
@@ -24,10 +30,21 @@
       "source_commit": "93a6150ed",
       "eager_and_graph": true
     },
-    "full_model_validated": false
+    "full_model_validated": false,
+    "fixed_expert_remap": {
+      "passed": 48,
+      "source_commit": "1b99488b8",
+      "scope": "Exact compiled router ID/padding eager+graph on one H200; not full-model arithmetic"
+    },
+    "hicache_bytes": {
+      "attempt": "hicache-bytes-r2",
+      "passed": 24,
+      "exact_bytes": true,
+      "scope": "Pool transfers and local DCP/sidecar mapping on one H200, not full-model or consensus parity"
+    }
   },
   "image_built": false,
-  "model_requests_sent": 3820,
+  "model_requests_sent": 3853,
   "performance_validated": false,
   "oom_headroom_validated": false,
   "validated_gpu_profile": null,
@@ -40,7 +57,8 @@
     "P4": 627,
     "P5_on_P3": 627,
     "P6graph_on_P4": 627,
-    "P6buckets_on_P2": 627
+    "P6buckets_on_P2": 627,
+    "P8": "allocated8H200;48CUDAroutercasespassed;modelinitializing"
   },
   "server_startup_previous_hicache96": {
     "status": "blocked_host_ram_before_readiness",
@@ -60,17 +78,25 @@
   "performance_measurements_available": true,
   "performance_requests": 3762,
   "performance_request_errors": 0,
-  "additional_cache_diagnostic_requests": 49,
-  "smoke_requests": 7,
+  "additional_cache_diagnostic_requests": 78,
+  "smoke_requests": 8,
   "model_request_count_scope": "External campaign clients only; excludes internal startup warmup and health requests",
   "remaining": [
-    "Profile-guided NCCL diagnostic and targeted experiment if supported",
-    "Final report/profile acceptance with long/decode tradeoffs",
-    "Full-model numerical cache transfer parity"
+    "P8 model generation, matched reference comparison and627-request performance workload",
+    "Full-model numerical repeatability/cache correctness remains inconclusive",
+    "P8 causal profile, final report/profile acceptance and verified GPU cleanup"
   ],
   "cleanup_blocker": null,
   "profiling_requests": 2,
   "performance_acceptance": {
     "P6buckets": "Continuous short-only p95 2.441 to1.432s vsP2; three paired seeds. Fresh/mixed nearly unchanged. Full cache tensor parity still inconclusive."
+  },
+  "expert_calibration_requests": 3,
+  "cache_matched_diagnostic": {
+    "requests": 29,
+    "resident_first_top20_repeatable": false,
+    "max_shared_logprob_difference_before_host_eviction": 0.6795616149902344,
+    "host_reload_difference": 0.44080352783203125,
+    "result": "inconclusive; no tolerances relaxed"
   }
 }

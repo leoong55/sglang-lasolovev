@@ -6,7 +6,7 @@
     547620
   ],
   "calibration_heldout_seed": 548620,
-  "source_commit": "4f440e4f5",
+  "source_commit": "1b99488b8",
   "native_init_expert_location": true,
   "online_eplb": false,
   "replicated_experts": 0,
@@ -23,5 +23,10 @@
     "HiCache64",
     "P6buckets"
   ],
-  "status": "prepared_only; must inspect cache gate and numerical compatibility before launching benchmark"
+  "status": "running; exact CUDA routing gate48/48 passed; distributed initialization; model/bench pending",
+  "required_fix": "Fixed-placement remap without online EPLB; two CPU regressions fail before and pass after",
+  "bundle_sha256": "983db7a3bb4113e4bbdaa0338f5cd0c86b75d199801fb8d16b427689a43b7f73",
+  "hicache_component_gate": "24/24 exact-byte cases, one H200; not full-model parity",
+  "routing_component_gate": "48/48 exact ID/padding eager/graph cases, one H200",
+  "model_reference_check": "prepared, not launched"
 }

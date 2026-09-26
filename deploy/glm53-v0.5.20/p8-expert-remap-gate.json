@@ -1,0 +1,344 @@
+{
+  "passed": 48,
+  "cases": [
+    {
+      "layer": 3,
+      "rows": 1,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 1,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 1,
+      "valid": 1,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 1,
+      "valid": 1,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 257,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 257,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 257,
+      "valid": 254,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 257,
+      "valid": 254,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 257,
+      "valid": 257,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 257,
+      "valid": 257,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 16384,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 16384,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 16384,
+      "valid": 16381,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 16384,
+      "valid": 16381,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 16384,
+      "valid": 16384,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 3,
+      "rows": 16384,
+      "valid": 16384,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 1,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 1,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 1,
+      "valid": 1,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 1,
+      "valid": 1,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 257,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 257,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 257,
+      "valid": 254,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 257,
+      "valid": 254,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 257,
+      "valid": 257,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 257,
+      "valid": 257,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 16384,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 16384,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 16384,
+      "valid": 16381,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 16384,
+      "valid": 16381,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 16384,
+      "valid": 16384,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 41,
+      "rows": 16384,
+      "valid": 16384,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 1,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 1,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 1,
+      "valid": 1,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 1,
+      "valid": 1,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 257,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 257,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 257,
+      "valid": 254,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 257,
+      "valid": 254,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 257,
+      "valid": 257,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 257,
+      "valid": 257,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 16384,
+      "valid": 0,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 16384,
+      "valid": 0,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 16384,
+      "valid": 16381,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 16384,
+      "valid": 16381,
+      "mode": "graph",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 16384,
+      "valid": 16384,
+      "mode": "eager",
+      "exact": true
+    },
+    {
+      "layer": 77,
+      "rows": 16384,
+      "valid": 16384,
+      "mode": "graph",
+      "exact": true
+    }
+  ],
+  "elapsed_s": 14.65141248703003,
+  "gpu": "NVIDIA H200",
+  "scope": "Exact compiled routing IDs/padding eager+graph on one H200; not full-model arithmetic"
+}

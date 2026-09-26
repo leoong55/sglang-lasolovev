@@ -29,6 +29,11 @@ PAGE, DCP, LAYERS = 64, 4, 6
 LOGICAL_PAGE = PAGE * DCP
 SIZE = 4096
 rows = []
+# cudaHostRegister is explicit, not tied to Python garbage collection. Keep all
+# pools/mappings alive for this short process, as the serving process does.
+# Dropping the last mmap owner between cases can recycle an address still
+# registered by CUDA and make the next allocation fail with error712.
+pool_lifetimes = []
 
 
 def indices(pages, page_size=LOGICAL_PAGE):
@@ -74,6 +79,7 @@ for rank in range(DCP):
             host_size=0, page_size=LOGICAL_PAGE, layout='layer_first',
             pool_label='draft',
         )
+        pool_lifetimes.append((target, host, index_host, draft, draft_host))
         families = [
             ('mla', target.kv_buffer, host.data_refs),
             ('indexer', index_host.packed_device_index_buffers,
@@ -93,6 +99,7 @@ for rank in range(DCP):
             producer, backup, restore = [torch.cuda.Stream() for _ in range(3)]
             produced, copied = torch.cuda.Event(), torch.cuda.Event()
             saved = []
+            producer.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(producer):
                 torch.manual_seed(1000 + rank * 100 + n + int(sparse))
                 for name, buffers, _ in families:

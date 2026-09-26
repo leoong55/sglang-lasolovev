@@ -1,0 +1,65 @@
+[
+  {
+    "reference": "resident-before-0",
+    "candidate": "resident-before-0",
+    "output_ids_equal": true,
+    "first_output_top20_exact": true,
+    "shared_top_tokens": 20,
+    "max_abs_logprob_difference_on_shared": 0.0,
+    "first_output_id_equal": true
+  },
+  {
+    "reference": "resident-before-0",
+    "candidate": "resident-before-1",
+    "output_ids_equal": false,
+    "first_output_top20_exact": false,
+    "shared_top_tokens": 17,
+    "max_abs_logprob_difference_on_shared": 0.6166090965270996,
+    "first_output_id_equal": true
+  },
+  {
+    "reference": "resident-before-0",
+    "candidate": "resident-before-2",
+    "output_ids_equal": false,
+    "first_output_top20_exact": false,
+    "shared_top_tokens": 15,
+    "max_abs_logprob_difference_on_shared": 0.6795616149902344,
+    "first_output_id_equal": true
+  },
+  {
+    "reference": "resident-before-0",
+    "candidate": "host-reload",
+    "output_ids_equal": false,
+    "first_output_top20_exact": false,
+    "shared_top_tokens": 18,
+    "max_abs_logprob_difference_on_shared": 0.44080352783203125,
+    "first_output_id_equal": true
+  },
+  {
+    "reference": "resident-before-0",
+    "candidate": "resident-after-0",
+    "output_ids_equal": false,
+    "first_output_top20_exact": false,
+    "shared_top_tokens": 18,
+    "max_abs_logprob_difference_on_shared": 0.30470705032348633,
+    "first_output_id_equal": true
+  },
+  {
+    "reference": "resident-before-0",
+    "candidate": "resident-after-1",
+    "output_ids_equal": false,
+    "first_output_top20_exact": false,
+    "shared_top_tokens": 16,
+    "max_abs_logprob_difference_on_shared": 0.49396800994873047,
+    "first_output_id_equal": true
+  },
+  {
+    "reference": "resident-before-0",
+    "candidate": "resident-after-2",
+    "output_ids_equal": false,
+    "first_output_top20_exact": false,
+    "shared_top_tokens": 17,
+    "max_abs_logprob_difference_on_shared": 0.4046940803527832,
+    "first_output_id_equal": true
+  }
+]
