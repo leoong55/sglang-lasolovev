@@ -280,6 +280,7 @@ def sparse_mla_q8kv8_prefill_fwd(
     out: Optional[torch.Tensor] = None,  # [s_q, h_q, d_v], bfloat16
     max_logits: Optional[torch.Tensor] = None,  # [s_q, h_q], float32
     lse: Optional[torch.Tensor] = None,  # [s_q, h_q], float32
+    validate_topk_length: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Run Q8KV8 (FP8) sparse prefill attention on SM90.
 
@@ -287,6 +288,10 @@ def sparse_mla_q8kv8_prefill_fwd(
     are allocated and returned; callers that want to reuse buffers may pass
     pre-allocated ``out`` / ``max_logits`` / ``lse`` tensors of the expected
     shape/dtype/device. The three output tensors must not alias each other.
+
+    ``validate_topk_length=False`` is reserved for callers whose GPU producer
+    guarantees lengths in [0, topk]. Shape/dtype/device checks remain active;
+    only the device-to-host value check is skipped for CUDA graph capture.
 
     Returns:
         out:        [s_q, h_q, d_v], bfloat16
@@ -388,7 +393,9 @@ def sparse_mla_q8kv8_prefill_fwd(
             )
         if not topk_length.is_contiguous():
             raise ValueError("topk_length must be contiguous")
-        if torch.any(topk_length < 0).item() or torch.any(topk_length > topk).item():
+        if validate_topk_length and (
+            torch.any(topk_length < 0).item() or torch.any(topk_length > topk).item()
+        ):
             raise ValueError(
                 f"topk_length values must satisfy 0 <= topk_length <= topk ({topk})"
             )

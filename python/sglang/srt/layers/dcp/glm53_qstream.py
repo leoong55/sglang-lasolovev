@@ -100,7 +100,9 @@ class QStreamAttention:
         local, lengths = compact_topk(ids_all, layout.widened)
         out, _, lse = sparse_mla_q8kv8_prefill_fwd(
             q_all, kv, local.unsqueeze(1), scale, self.identity, self.identity,
-            d_v=512, topk_length=lengths)
+            # compact_topk produces a sum of at most topk boolean entries.
+            # Reading lengths back on the host breaks capture and serializes tiles.
+            d_v=512, topk_length=lengths, validate_topk_length=False)
         empty = lengths == 0
         lse = q8_lse_base2(lse,lengths)
         out = torch.where(empty[:,None,None], 0, out)
