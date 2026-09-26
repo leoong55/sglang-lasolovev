@@ -52,3 +52,23 @@ its64 native FP32-reference diagnostic points within the unchanged bound; its
 failed repeatability gate is not relabeled passed. The startup evidence records
 that distinction. Neither arm is a production-approved profile. P9 serving
 has been created; P10 is prepared only, with no performance measurements yet.
+
+
+## Paired resident/host-cache diagnostic (prepared, not measured)
+
+After each P9/P10 performance run, `diagnostics/cache_matched_streamk_pair.py`
+repeats the previous 29-request matched-cache workload with the same seed.
+Three resident repeats precede 21 independent 128k prefixes, one verified host
+reload and three resident repeats follow. Each comparison has the same
+130816 cached tokens plus 256 new tokens, and compares first-token top-20
+log probabilities and all 32 greedy output IDs exactly. No tolerance is added.
+
+This distinguishes full-model resident repeatability from an additional
+HiCache reload difference after the component Stream-K finding. The P9/P10
+pair shares the expert layout, padding fix, runtime source and cache capacity.
+The script requires its matching weight version, 15 completed performance
+scenarios, and saved exact nonce/natural stop before it may flush cache.
+Its prepared Job mounts only the results volume; the script refuses to overwrite
+existing evidence.
+These are sampled output comparisons, not full-logit equivalence or model
+quality validation. Neither paired cache Job has run at this revision.
