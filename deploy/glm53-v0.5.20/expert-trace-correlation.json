@@ -1,0 +1,7 @@
+{
+  "assumption": "150 trace collectives ordered as 2 passes of 75 MoE layers (3..77); different calibration inputs, diagnostic correlation only",
+  "matched": 150,
+  "heaviest_rank_match": 138,
+  "top2_match": 149,
+  "late_rank_count_order_median": 1.0
+}

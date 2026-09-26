@@ -1,0 +1,27 @@
+{
+  "layout_sha256": "466915d651a44d3c4051be14f7c7d3188551b657f5b3d1bf57f33b2a2fec6da4",
+  "reference": "p6buckets-r1",
+  "calibration_train_seeds": [
+    546620,
+    547620
+  ],
+  "calibration_heldout_seed": 548620,
+  "source_commit": "4f440e4f5",
+  "native_init_expert_location": true,
+  "online_eplb": false,
+  "replicated_experts": 0,
+  "unchanged": [
+    "weights",
+    "Humming",
+    "TP8",
+    "CP8",
+    "DCP4",
+    "EP8",
+    "chunk16384",
+    "full DFlash",
+    "KV600000",
+    "HiCache64",
+    "P6buckets"
+  ],
+  "status": "prepared_only; must inspect cache gate and numerical compatibility before launching benchmark"
+}

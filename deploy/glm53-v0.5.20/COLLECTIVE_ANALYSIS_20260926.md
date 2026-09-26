@@ -62,3 +62,37 @@ recorder, без EPLB или перемещения весов. После exact
 
 Сначала подтвердить или отвергнуть imbalance. Только затем выбирать балансировку
 или адресное изменение Humming; не подменять ожидание GPU «медленным NCCL».
+
+
+## Expert counts подтверждают источник ожидания
+
+P7 прошёл exact nonce/natural stop и три отдельных calibration128k/1out.
+В native recorder сохранены24полныхprefillшага,78слоёв,256экспертов;75слоёв MoE.
+На текущем contiguous размещении max/mean работы восьми EP ranks:
+median1.701, p95=2.555. Это отношение routing counts, не SM utilization.
+Сумма счётчиков включает одинаковые наблюдения ranks; абсолютное число
+не выдаётся за число уникальных входных токенов.
+
+Для138из150collectives предыдущего trace поздний rank совпадает с самым
+нагруженным rank по counts;149/150попадают в два самых нагруженных. Входы
+trace и калибровки различаются; сопоставление исходит из порядка75MoEслоёв
+дважды. Это сильное независимое подтверждение MoE-skew в данной синтетической
+нагрузке, а не доказательство такого же распределения на произвольном проде.
+
+Подготовлен один адресный опыт P8: фиксированная перестановка256экспертов
+на каждомслое,32/GPU, через штатный --init-expert-location и rank-invariant
+--ep-dispatch-algorithm dynamic. Без дубликатов, онлайн EPLB, изменения
+весов, Humming, CP/DCP/TP/EP, KV cap или cache policy.
+Алгоритм — capacity-constrained greedy packing, как в
+[DeepSeek EPLB](https://github.com/deepseek-ai/EPLB/blob/main/eplb.py);
+[штатный SGLang init expert location](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/eplb/expert_location.py)
+читает physical_to_logical_map. Локальная закреплённая версия проверена по коду
+loader/remap; draft-worker не перезаписывает target metadata.
+
+Карта построена по первым двум новым calibration inputs; третий отложен.
+На третьем прогноз max/mean median1.701→1.079, p95=2.577→1.215;
+сумма наибольшей нагрузки по слоям/шагам меньше39.0%.
+**Это расчёт token load, не измеренное ускорение модели.**
+P8 ещё не запущен; обязательны численная проверка и сопоставимый workload.
+См.expert-count-analysis.json, expert-trace-correlation.json и
+p8-expertlayout-r1-design.json.
