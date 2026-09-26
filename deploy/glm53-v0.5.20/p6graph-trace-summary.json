@@ -1,0 +1,379 @@
+{
+  "file": "qstream-2steps-1790447696.8030064-TP-0-EP-0.trace.json.gz",
+  "categories": {
+    "user_annotation": 838,
+    "cpu_op": 61681,
+    "kernel": 52854,
+    "overhead": 9,
+    "cuda_runtime": 24735,
+    "gpu_memcpy": 4571,
+    "gpu_memset": 330,
+    "cuda_driver": 2072,
+    "gpu_user_annotation": 813,
+    "Trace": 1
+  },
+  "top_by_category": {
+    "kernel": [
+      {
+        "name": "ncclDevKernel_ReduceScatter_Sum_f32_RING_LL(ncclDevKernelArgsStorage<4096ul>)",
+        "count": 1250,
+        "sum_duration_ms": 428.543466
+      },
+      {
+        "name": "ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<4096ul>)",
+        "count": 4102,
+        "sum_duration_ms": 379.78384299999914
+      },
+      {
+        "name": "ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL(ncclDevKernelArgsStorage<4096ul>)",
+        "count": 150,
+        "sum_duration_ms": 258.46120999999994
+      },
+      {
+        "name": "void sm90::fwd::sparse_mla_q8kv8_prefill_kernel<sm90::fwd::SparseMlaQ8Kv8PrefillKernel<576, true, false>, sm90::fwd::SparseMlaQ8Kv8PrefillKernel<576, true, false>::TmaParams_t>(SparseMlaQ8Kv8PrefillParams, sm90::fwd::SparseMlaQ8Kv8PrefillKernel<576, true, false>::TmaParams_t)",
+        "count": 1250,
+        "sum_duration_ms": 185.3918959999998
+      },
+      {
+        "name": "void humming<MmaOpClass, Shape<0u, 4096u, 6144u>, Shape<128u, 256u, 128u>, Shape<128u, 32u, 128u>, Shape<0u, 0u, 0u>, FloatingPointType<8u, 4u, 3u>, IntegerType<false, 4u>, FloatingPointType<16u, 8u, 7u>, FloatingPointType<16u, 8u, 7u>, LayerConfig, ComputeConfig, TuningConfig>(KernelTensorParamType<TuningConfig::kUseTmaA>::Type, KernelTensorParamType<TuningConfig::kUseTmaB>::Type, KernelTensorParamType<TuningConfig::kUseTmaC>::Type, KernelTensorParamType<TuningConfig::kUseTmaAS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBZP>::Type, KernelTensorParamType<TuningConfig::kUseTmaBias>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS2>::Type, unsigned int const*, unsigned int const*, unsigned int const*, unsigned int const*, CUtensorMap_st*, int*, unsigned int, unsigned int, bool)",
+        "count": 150,
+        "sum_duration_ms": 176.35642199999992
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(bool, unsigned int, unsigned int)#1}>(at::TensorIteratorBase&, at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(bool, unsigned int, unsigned int)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(bool, unsigned int, unsigned int)#1}>(at::TensorIteratorBase&, at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(bool, unsigned int, unsigned int)#1} const&)::{lambda(int)#1})",
+        "count": 3756,
+        "sum_duration_ms": 158.0285640000013
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+        "count": 1250,
+        "sum_duration_ms": 130.32221400000014
+      },
+      {
+        "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+        "count": 1252,
+        "sum_duration_ms": 121.76407899999988
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(bool, unsigned short, unsigned short)#1}>(at::TensorIteratorBase&, at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(bool, unsigned short, unsigned short)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(bool, unsigned short, unsigned short)#1}>(at::TensorIteratorBase&, at::native::(anonymous namespace)::where_kernel_impl(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#2}::operator()() const::{lambda(bool, unsigned short, unsigned short)#1} const&)::{lambda(int)#1})",
+        "count": 1250,
+        "sum_duration_ms": 109.062664
+      },
+      {
+        "name": "void humming<MmaOpClass, Shape<0u, 6144u, 2048u>, Shape<128u, 256u, 128u>, Shape<128u, 32u, 128u>, Shape<0u, 0u, 0u>, FloatingPointType<8u, 4u, 3u>, IntegerType<false, 4u>, FloatingPointType<16u, 8u, 7u>, FloatingPointType<16u, 8u, 7u>, LayerConfig, ComputeConfig, TuningConfig>(KernelTensorParamType<TuningConfig::kUseTmaA>::Type, KernelTensorParamType<TuningConfig::kUseTmaB>::Type, KernelTensorParamType<TuningConfig::kUseTmaC>::Type, KernelTensorParamType<TuningConfig::kUseTmaAS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBZP>::Type, KernelTensorParamType<TuningConfig::kUseTmaBias>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS2>::Type, unsigned int const*, unsigned int const*, unsigned int const*, unsigned int const*, CUtensorMap_st*, int*, unsigned int, unsigned int, bool)",
+        "count": 150,
+        "sum_duration_ms": 102.38324500000006
+      },
+      {
+        "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 256u, 128u, 128u, 128u, 128u, 128u, 3u, 128u, 256u, 2u, true, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)",
+        "count": 666,
+        "sum_duration_ms": 99.00759000000005
+      },
+      {
+        "name": "void flashinfer::activation::act_and_mul_kernel<__nv_bfloat16, &(float silu<float>(float const&))>(__nv_bfloat16*, __nv_bfloat16 const*, int)",
+        "count": 150,
+        "sum_duration_ms": 54.992873
+      },
+      {
+        "name": "_quant_tensor_kernel",
+        "count": 300,
+        "sum_duration_ms": 43.055268000000005
+      },
+      {
+        "name": "_compact",
+        "count": 1250,
+        "sum_duration_ms": 40.37705399999996
+      },
+      {
+        "name": "void at::native::vectorized_elementwise_kernel<8, at::native::CUDAFunctor_add<c10::BFloat16>, std::array<char*, 3ul> >(int, at::native::CUDAFunctor_add<c10::BFloat16>, std::array<char*, 3ul>)",
+        "count": 150,
+        "sum_duration_ms": 20.772156
+      },
+      {
+        "name": "moe_fused_mul_sum_kernel",
+        "count": 150,
+        "sum_duration_ms": 20.252291000000003
+      },
+      {
+        "name": "nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN",
+        "count": 2,
+        "sum_duration_ms": 18.518027999999997
+      },
+      {
+        "name": "void sglang::per_token_group_quant_flat_kernel<sglang::QuantTrait<__nv_bfloat16, __nv_fp8_e4m3, 128u, false, false, true, false>, true>(sglang::QuantKernelParams)",
+        "count": 822,
+        "sum_duration_ms": 18.333769000000014
+      },
+      {
+        "name": "ncclDevKernel_AllReduce_Sum_bf16_RING_LL(ncclDevKernelArgsStorage<4096ul>)",
+        "count": 2,
+        "sum_duration_ms": 17.843249
+      },
+      {
+        "name": "void at::native::vectorized_elementwise_kernel<8, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda(float)#1}, std::array<char*, 2ul> >(int, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda(float)#1}, std::array<char*, 2ul>)",
+        "count": 1250,
+        "sum_duration_ms": 14.57408400000004
+      },
+      {
+        "name": "void deep_gemm::sm90_fp8_mqa_logits<32u, 128u, true, false, 4u, 256u, 3u, 3u, 132u, 128u, 512u, float>(unsigned int, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*, float*, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)",
+        "count": 42,
+        "sum_duration_ms": 13.507490000000002
+      },
+      {
+        "name": "_router_triton_kernel",
+        "count": 150,
+        "sum_duration_ms": 13.316870000000002
+      },
+      {
+        "name": "nvjet_sm90_tss_128x256_64x4_2x1_v_bz_coopA_TNN",
+        "count": 150,
+        "sum_duration_ms": 11.162891999999998
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1} const&)::{lambda(int)#1})",
+        "count": 528,
+        "sum_duration_ms": 10.944278999999996
+      },
+      {
+        "name": "nvjet_sm90_tst_128x256_64x4_2x1_v_bz_coopA_TNN",
+        "count": 156,
+        "sum_duration_ms": 10.034130999999999
+      }
+    ],
+    "cuda_runtime": [
+      {
+        "name": "cudaGraphLaunch",
+        "count": 1406,
+        "sum_duration_ms": 971.5466469999998
+      },
+      {
+        "name": "cudaMemcpyAsync",
+        "count": 4571,
+        "sum_duration_ms": 165.5387479999997
+      },
+      {
+        "name": "cudaMalloc",
+        "count": 51,
+        "sum_duration_ms": 126.03777899999997
+      },
+      {
+        "name": "cudaStreamSynchronize",
+        "count": 10,
+        "sum_duration_ms": 103.246178
+      },
+      {
+        "name": "cudaFree",
+        "count": 42,
+        "sum_duration_ms": 93.70775200000001
+      },
+      {
+        "name": "cudaLaunchKernel",
+        "count": 3890,
+        "sum_duration_ms": 56.909296999999974
+      },
+      {
+        "name": "cudaLaunchKernelExC",
+        "count": 1166,
+        "sum_duration_ms": 13.872407000000011
+      },
+      {
+        "name": "cudaEventQuery",
+        "count": 2968,
+        "sum_duration_ms": 9.984325000000023
+      },
+      {
+        "name": "cudaEventRecordWithFlags",
+        "count": 1456,
+        "sum_duration_ms": 6.318305999999999
+      },
+      {
+        "name": "cudaPointerGetAttributes",
+        "count": 2804,
+        "sum_duration_ms": 5.918437000000012
+      },
+      {
+        "name": "cudaMemsetAsync",
+        "count": 330,
+        "sum_duration_ms": 4.582254
+      },
+      {
+        "name": "cudaStreamIsCapturing",
+        "count": 2573,
+        "sum_duration_ms": 2.097137999999999
+      },
+      {
+        "name": "cudaEventRecord",
+        "count": 652,
+        "sum_duration_ms": 1.6145629999999982
+      },
+      {
+        "name": "cudaStreamWaitEvent",
+        "count": 540,
+        "sum_duration_ms": 1.2778469999999993
+      },
+      {
+        "name": "cudaStreamCreateWithFlags",
+        "count": 8,
+        "sum_duration_ms": 1.144328
+      },
+      {
+        "name": "cudaFreeHost",
+        "count": 45,
+        "sum_duration_ms": 1.1183899999999998
+      },
+      {
+        "name": "cudaStreamGetCaptureInfo",
+        "count": 606,
+        "sum_duration_ms": 0.7962620000000001
+      },
+      {
+        "name": "cudaGraphInstantiateWithFlags",
+        "count": 2,
+        "sum_duration_ms": 0.7108869999999999
+      },
+      {
+        "name": "cudaGetFuncBySymbol",
+        "count": 222,
+        "sum_duration_ms": 0.6655849999999995
+      },
+      {
+        "name": "cudaThreadExchangeStreamCaptureMode",
+        "count": 650,
+        "sum_duration_ms": 0.6536429999999994
+      },
+      {
+        "name": "cudaEventElapsedTime",
+        "count": 558,
+        "sum_duration_ms": 0.5160940000000002
+      },
+      {
+        "name": "cudaDeviceSynchronize",
+        "count": 3,
+        "sum_duration_ms": 0.287873
+      },
+      {
+        "name": "cudaHostAlloc",
+        "count": 12,
+        "sum_duration_ms": 0.28270999999999996
+      },
+      {
+        "name": "cudaGraphExecDestroy",
+        "count": 2,
+        "sum_duration_ms": 0.243285
+      },
+      {
+        "name": "cudaStreamDestroy",
+        "count": 8,
+        "sum_duration_ms": 0.19530399999999998
+      }
+    ],
+    "user_annotation": [
+      {
+        "name": "step[EXTEND bs=1 toks=16384]",
+        "count": 2,
+        "sum_duration_ms": 2770.391492
+      },
+      {
+        "name": "scheduler.run_batch",
+        "count": 2,
+        "sum_duration_ms": 1621.223848
+      },
+      {
+        "name": "glm53.prefill.attention",
+        "count": 156,
+        "sum_duration_ms": 1440.5541209999997
+      },
+      {
+        "name": "glm53.prefill.kv_convert",
+        "count": 312,
+        "sum_duration_ms": 86.95025299999995
+      },
+      {
+        "name": "glm53.prefill.indexer",
+        "count": 42,
+        "sum_duration_ms": 50.10159799999999
+      },
+      {
+        "name": "scheduler.get_next_batch_to_run",
+        "count": 4,
+        "sum_duration_ms": 32.331007
+      },
+      {
+        "name": "nccl:_all_gather_base",
+        "count": 202,
+        "sum_duration_ms": 30.577532000000005
+      },
+      {
+        "name": "glm53.prefill.hicache_consensus",
+        "count": 4,
+        "sum_duration_ms": 22.770194
+      },
+      {
+        "name": "gloo:all_reduce",
+        "count": 4,
+        "sum_duration_ms": 19.043725
+      },
+      {
+        "name": "glm53.prefill.dcp_reduce",
+        "count": 2,
+        "sum_duration_ms": 16.616661
+      },
+      {
+        "name": "scheduler.recv_requests",
+        "count": 4,
+        "sum_duration_ms": 7.798206
+      },
+      {
+        "name": "glm53.prefill.topk",
+        "count": 42,
+        "sum_duration_ms": 6.851429999999999
+      },
+      {
+        "name": "## Call CompiledFxGraph frokjvjb63et7fsrxj2a2fgl6tms2je6lp63u6jmm7meayxe4df7 ##",
+        "count": 42,
+        "sum_duration_ms": 6.120442000000001
+      },
+      {
+        "name": "gloo:broadcast",
+        "count": 4,
+        "sum_duration_ms": 4.755242
+      },
+      {
+        "name": "scheduler.process_batch_result",
+        "count": 2,
+        "sum_duration_ms": 2.488719
+      },
+      {
+        "name": "glm53.prefill.draft_append",
+        "count": 2,
+        "sum_duration_ms": 2.3076940000000006
+      },
+      {
+        "name": "glm53.prefill.dcp_gather",
+        "count": 2,
+        "sum_duration_ms": 0.664697
+      },
+      {
+        "name": "copy_result_to_cpu",
+        "count": 2,
+        "sum_duration_ms": 0.39177
+      },
+      {
+        "name": "nccl:all_reduce",
+        "count": 2,
+        "sum_duration_ms": 0.313827
+      },
+      {
+        "name": "nccl:broadcast",
+        "count": 2,
+        "sum_duration_ms": 0.27465300000000004
+      },
+      {
+        "name": "scheduler.process_input_requests",
+        "count": 4,
+        "sum_duration_ms": 0.194397
+      }
+    ]
+  },
+  "limits": "Profiled two steps only, profiling overhead included; durations inclusive and may overlap, do not add categories/ranks."
+}
