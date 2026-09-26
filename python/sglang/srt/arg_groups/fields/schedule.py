@@ -72,6 +72,9 @@ class Schedule(msgspec.Struct):
     prefill_interleaving_min_continuation_tokens: A[
         Optional[int], "Minimum continuing tokens, aligned to the logical KV page. Adaptive defaults to one page.",
     ] = None
+    glm53_hicache_event_sync: A[
+        str, Arg(help="HiCache readiness consensus; pipelined requires PP1/DP1 without storage/linker.", choices=["sync", "pipelined"]),
+    ] = "sync"
     glm53_dcp_prefill_mode: A[
         str, Arg(help="Experimental SM90 GLM CP8/DCP4 prefill communication.", choices=["kv-gather", "q-stream"]),
     ] = "kv-gather"

@@ -259,6 +259,9 @@ class UnifiedRadixCache(BasePrefixCache):
         self.pp_rank = params.pp_rank
         self.pp_size = params.pp_size
         self.work_list: list[torch.distributed.Work] = []
+        self._glm53_consensus = None
+        self._glm53_consensus_group = None
+        self._glm53_snapshot_queues = None
 
         # HiCache D↔H defaults (overridden by init_hicache)
         self.cache_controller: Optional[HybridCacheController] = None
@@ -370,9 +373,12 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def init_cache_linker(self, cache_linker: UnifiedCacheLinker) -> None:
         """Attach an external KV store directly to the device pools."""
+        if self._glm53_consensus is not None:
+            raise ValueError("Disable pipelined HiCache before attaching a linker")
         self.linker = UnifiedCacheLinkerWrapper(self, cache_linker)
 
     def reset(self) -> None:
+        self.drain_hicache_consensus()
         if self.linker is not None:
             self.linker.reset()
         self._reset_full()
@@ -408,6 +414,16 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def init_hicache(self, server_args: ServerArgs, params: CacheInitParams) -> None:
         """Initialize HiCache infrastructure."""
+        from sglang.srt.runtime_context import get_schedule
+        if get_schedule().glm53_hicache_event_sync == "pipelined":
+            from sglang.srt.mem_cache.glm53_consensus import ReadyConsensus
+            # DP1/PP1 validation ensures all world ranks create this group in
+            # the same order. It must not share ordering with scheduler collectives.
+            ranks = torch.distributed.get_process_group_ranks(self.tp_group)
+            self._glm53_consensus_group = torch.distributed.new_group(ranks=ranks, backend="gloo")
+            self._glm53_consensus = ReadyConsensus(lambda tensor: torch.distributed.all_reduce(
+                tensor, op=torch.distributed.ReduceOp.MIN,
+                group=self._glm53_consensus_group, async_op=True))
         self.host_memory_mode = get_memory().hicache_host_memory_mode
         if self.host_memory_mode == "buffer_only":
             # TODO(Jialin): Extend buffer-only state handoff to Mamba in a
@@ -3017,6 +3033,8 @@ class UnifiedRadixCache(BasePrefixCache):
         hicache_write_policy: Optional[str] = None,
     ) -> tuple[bool, str]:
         """Attach (enable) the HiCache storage backend at runtime."""
+        if self._glm53_consensus is not None:
+            return False, "Disable pipelined HiCache before attaching storage"
         if self._storage_attachment is None:
             return (
                 False,
@@ -3039,6 +3057,7 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def shutdown(self) -> None:
         """Best-effort auto-detach of the storage backend on process shutdown."""
+        self.drain_hicache_consensus()
         if self._storage_attachment is not None:
             self._storage_attachment.shutdown()
 
@@ -3128,6 +3147,8 @@ class UnifiedRadixCache(BasePrefixCache):
         if cc is None:
             return
 
+        if write_back or finish_count is None:
+            self.drain_hicache_consensus()
         if write_back:
             # Blocking: wait for all pending write-backs
             while self.ongoing_write_through:
@@ -3183,6 +3204,7 @@ class UnifiedRadixCache(BasePrefixCache):
         if cc is None:
             return
         if finish_count is None:
+            self.drain_hicache_consensus()
             # Every rank must enter the all_reduce below; ongoing_load_back can
             # diverge across ranks.
             finish_count = 0
@@ -3280,6 +3302,32 @@ class UnifiedRadixCache(BasePrefixCache):
             last_best_match_device_node_id,
         )
 
+    def drain_hicache_consensus(self) -> None:
+        """Complete the submitted snapshot before any out-of-band queue drain."""
+        consensus = self._glm53_consensus
+        if consensus is None or consensus.pending is None:
+            return
+        from sglang.srt.observability.glm53_prefill import stage
+        with stage("hicache_consensus", cuda=False):
+            writes, loads = consensus.finish()
+        cc = self.cache_controller
+        write_ids, load_ids = self._glm53_snapshot_queues
+        if tuple(id(x) for x in cc.ack_write_queue[:writes]) != write_ids[:writes] or tuple(id(x) for x in cc.ack_load_queue[:loads]) != load_ids[:loads]:
+            raise RuntimeError("HiCache ack queue changed while readiness snapshot was in flight")
+        self._glm53_snapshot_queues = None
+        # Existing producer/write fences and resource ownership transitions stay intact.
+        self.writing_check(finish_count=writes)
+        self.loading_check(finish_count=loads)
+
+    def _submit_hicache_consensus(self) -> None:
+        cc = self.cache_controller
+        writes = self._count_ready_acks(cc.ack_write_queue)
+        loads = self._count_ready_acks(cc.ack_load_queue)
+        self._glm53_snapshot_queues = (tuple(id(x) for x in cc.ack_write_queue[:writes]),
+                                       tuple(id(x) for x in cc.ack_load_queue[:loads]))
+        # Submit even when both local counters are zero.
+        self._glm53_consensus.submit(writes, loads, self.tree_core.write_back_duplicate_reclaim_digest)
+
     def check_hicache_events(self) -> None:
         """Called per scheduler step to poll async HiCache events."""
         if self.linker is not None:
@@ -3301,6 +3349,15 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.linker.commit_completed_offloads(
                     [bool(success) for success in successes.tolist()]
                 )
+            return
+
+        if self._glm53_consensus is not None:
+            if self.enable_storage or self.linker is not None or self.pp_size != 1:
+                raise RuntimeError("Pipelined HiCache configuration changed after initialization")
+            self.drain_hicache_consensus()
+            if self.buffer_pipeline is not None:
+                self.buffer_pipeline.flush_pending_writes()
+            self._submit_hicache_consensus()
             return
 
         # Reap the previous round's PP-sync sends before issuing new ones.

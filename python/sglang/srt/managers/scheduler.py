@@ -4797,6 +4797,9 @@ class Scheduler(
     @scheduler_stage_method(SCHEDULER_STAGE_IDLE)
     def on_idle(self):
         """Idle housekeeping: guard, check, metrics, reset, sleep."""
+        drain = getattr(self.tree_cache, "drain_hicache_consensus", None)
+        if drain is not None:
+            drain()
         # Flush any health-check signal deferred while the engine was busy.
         self.maybe_send_health_check_signal()
 
@@ -5728,6 +5731,9 @@ class Scheduler(
         return None
 
     def handle_shutdown(self, recv_req: ShutdownReq):
+        drain = getattr(self.tree_cache, "drain_hicache_consensus", None)
+        if drain is not None:
+            drain()
         # Break the event loop; the finally in run_scheduler_process releases resources.
         self.gracefully_exit = True
         return None

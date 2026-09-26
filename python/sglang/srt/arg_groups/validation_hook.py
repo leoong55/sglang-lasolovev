@@ -67,6 +67,12 @@ def check_server_args(server_args: Any):
         if envs.SGLANG_DSA_FUSE_TOPK.get():
             raise ValueError("Q-stream requires SGLANG_DSA_FUSE_TOPK=0")
 
+    if cfg.glm53_hicache_event_sync == "pipelined":
+        if (cfg.pp_size != 1 or cfg.dp_size != 1 or not cfg.enable_hierarchical_cache
+                or cfg.hicache_storage_backend is not None or cfg.enable_unified_cache_external_linker
+                or cfg.hicache_host_memory_mode != "cache"):
+            raise ValueError("Pipelined HiCache requires DP1/PP1 cache mode without storage or linker")
+
     # Check parallel size constraints
     if cfg.ep_join_mode != "scale":
         assert (cfg.tp_size * cfg.pp_size) % cfg.nnodes == 0, (
