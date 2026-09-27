@@ -1,0 +1,153 @@
+{
+  "verified_at": "2026-09-27T00:37:29.495835+00:00",
+  "archives": [
+    {
+      "manifest": "expert-arithmetic-r1-snapshot-manifest.json",
+      "archive": "expert-arithmetic-r1-snapshot.tar.gz",
+      "archive_sha256": "96353a217400ff549037a8d7724ed7f9ed91c8f953f41bc1e54d0d5a608146c7",
+      "files_verified": 5,
+      "requests": 0
+    },
+    {
+      "manifest": "expert-arithmetic-r2-snapshot-manifest.json",
+      "archive": "expert-arithmetic-r2-snapshot.tar.gz",
+      "archive_sha256": "36b971a1bc5d699782182ace1dbceb769f82fe6608c91b45e742afa1ce5e2095",
+      "files_verified": 5,
+      "requests": 0
+    },
+    {
+      "manifest": "expert-arithmetic-r3-snapshot-manifest.json",
+      "archive": "expert-arithmetic-r3-snapshot.tar.gz",
+      "archive_sha256": "5b0d84e027e31876c704f1779b729eb197818d320af4deff1203ff51694a401e",
+      "files_verified": 14,
+      "requests": 0
+    },
+    {
+      "manifest": "hicache-bytes-r1-snapshot-manifest.json",
+      "archive": "hicache-bytes-r1-snapshot.tar.gz",
+      "archive_sha256": "518e936f2e10374254b22e72b223d6f8f8c1b2939e8afdbe94143a5eb5ac8b83",
+      "files_verified": 3,
+      "requests": 0
+    },
+    {
+      "manifest": "hicache-bytes-r2-snapshot-manifest.json",
+      "archive": "hicache-bytes-r2-snapshot.tar.gz",
+      "archive_sha256": "467854dc81fd5eba6ee79b73546b7e8899e4f8997d4a91f695b5346a60d74f29",
+      "files_verified": 4,
+      "requests": 0
+    },
+    {
+      "manifest": "humming-drift-r1-snapshot-manifest.json",
+      "archive": "humming-drift-r1-snapshot.tar.gz",
+      "archive_sha256": "3c8e468ef9d37409032d5fa0d4c31fb902a8a7670908dd6f022fa3dd2d8f18af",
+      "files_verified": 13,
+      "requests": 0
+    },
+    {
+      "manifest": "nvls-probe-r1-snapshot-manifest.json",
+      "archive": "nvls-probe-r1-snapshot.tar.gz",
+      "archive_sha256": "0a9d791b1cacb6a588e58c55838a71d62d2f080952ac2df07f899e800ba46723",
+      "files_verified": 17,
+      "requests": 0
+    },
+    {
+      "manifest": "p10-streamk-profile-snapshot-manifest.json",
+      "archive": "p10-streamk-profile-snapshot.tar.gz",
+      "archive_sha256": "fad786cfa871ca992cfd112d4ece29bd53e5fe3116afd664ba3fd9e63f42eb5a",
+      "files_verified": 12,
+      "requests": 0
+    },
+    {
+      "manifest": "p10-streamk-r1-snapshot-manifest.json",
+      "archive": "p10-streamk-r1-snapshot.tar.gz",
+      "archive_sha256": "de6771f813406892e6859b544a68d60db8305b77c4525778eccff4e18e2c22bf",
+      "files_verified": 127,
+      "requests": 627
+    },
+    {
+      "manifest": "p2-r4-snapshot-manifest.json",
+      "archive": "p2-r4-snapshot.tar.gz",
+      "archive_sha256": "bcec1b85ff41a3992e10d7cdede70463e4bd6f5d63527b90475bc88be2e13b21",
+      "files_verified": 88,
+      "requests": 627
+    },
+    {
+      "manifest": "p3-r1-snapshot-manifest.json",
+      "archive": "p3-r1-snapshot.tar.gz",
+      "archive_sha256": "31ff727bac38939a4f3974bc0a6935a5412918289a5c4b9343cb3b4889a5f86f",
+      "files_verified": 116,
+      "requests": 627
+    },
+    {
+      "manifest": "p4-r1-snapshot-manifest.json",
+      "archive": "p4-r1-snapshot.tar.gz",
+      "archive_sha256": "9905c061e9b7f2c3e4baf416aa546fc919cb5221c0eda410166029a6b7499ebd",
+      "files_verified": 85,
+      "requests": 627
+    },
+    {
+      "manifest": "p5-r1-snapshot-manifest.json",
+      "archive": "p5-r1-snapshot.tar.gz",
+      "archive_sha256": "0120280e0c52c08bde4e8e9ad8ebd63be0535968c1326f70729e9801d1e407d7",
+      "files_verified": 112,
+      "requests": 627
+    },
+    {
+      "manifest": "p6buckets-profile-snapshot-manifest.json",
+      "archive": "p6buckets-profile-snapshot.tar.gz",
+      "archive_sha256": "2278b4f8b5e4c844a8de55e45e6100959aa63361b1c8011462135f9ac2fcb305",
+      "files_verified": 11,
+      "requests": 0
+    },
+    {
+      "manifest": "p6buckets-r1-snapshot-manifest.json",
+      "archive": "p6buckets-r1-snapshot.tar.gz",
+      "archive_sha256": "7abdebc67479fb7d15d9ef89c9300004c29b91c157634665275a7db9cb4901e3",
+      "files_verified": 85,
+      "requests": 627
+    },
+    {
+      "manifest": "p6graph-profile-snapshot-manifest.json",
+      "archive": "p6graph-profile-snapshot.tar.gz",
+      "archive_sha256": "62f4e93905d6a824b1733a2529cd32e00ef8fc691ab42c893a4339b214706d44",
+      "files_verified": 11,
+      "requests": 0
+    },
+    {
+      "manifest": "p6graph-r1-snapshot-manifest.json",
+      "archive": "p6graph-r1-snapshot.tar.gz",
+      "archive_sha256": "778554fc8b5e6decf8c8132eacc4db53917b8df570856d921ad919a1bb1abb97",
+      "files_verified": 85,
+      "requests": 627
+    },
+    {
+      "manifest": "p7-expertstats-r1-snapshot-manifest.json",
+      "archive": "p7-expertstats-r1-snapshot.tar.gz",
+      "archive_sha256": "fb765e74439c0ebd88bd33b2c458c96354ecbd27bf121f7d50a9a89f866c87f4",
+      "files_verified": 44,
+      "requests": 0
+    },
+    {
+      "manifest": "p8-expertlayout-profile-snapshot-manifest.json",
+      "archive": "p8-expertlayout-profile-snapshot.tar.gz",
+      "archive_sha256": "5e147efe37fdc2a252076ded3f5555bc0697ec1153062a2ba2f95b4627670c04",
+      "files_verified": 11,
+      "requests": 0
+    },
+    {
+      "manifest": "p8-expertlayout-r1-snapshot-manifest.json",
+      "archive": "p8-expertlayout-r1-snapshot.tar.gz",
+      "archive_sha256": "8f817b1c39ef4b3287ddb77082c6b1ddbe147c02e7fd366e56070bb6614436a6",
+      "files_verified": 94,
+      "requests": 627
+    },
+    {
+      "manifest": "p9-padids-r1-snapshot-manifest.json",
+      "archive": "p9-padids-r1-snapshot.tar.gz",
+      "archive_sha256": "a20a8bf39c93bdcacb68a65805d13ca0e7cd856c2de85d8a3f981f45ec6bf6b6",
+      "files_verified": 127,
+      "requests": 627
+    }
+  ],
+  "all_verified": true
+}

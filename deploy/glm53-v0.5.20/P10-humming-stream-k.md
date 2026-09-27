@@ -22,7 +22,8 @@ No shared default tuning dictionaries are mutated.
 Two CPU regressions execute the actual configuration method; one fails on the
 previous source and both pass with the change. The three-layer real-weight gate completed with unchanged rtol0.001/atol0.002
 and FP32-reference relativeL2<=0.08, as detailed below. Cross-layout strict parity
-is recorded separately. P10 has no serving result or full-model acceptance yet.
+is recorded separately. P10 serving measurements are complete below;
+full-model acceptance remains unresolved.
 
 At16k, the diagnostic rank-max local MoE times fell4.9–6.5%; at2k they ranged
 from1.4% faster to3.3% slower. These are ten replays of one layer with synthetic
@@ -50,7 +51,9 @@ P9 is explicitly a known-nondeterministic experimental control, supported by
 its64 native FP32-reference diagnostic points within the unchanged bound; its
 failed repeatability gate is not relabeled passed. The startup evidence records
 that distinction. Neither arm is a production-approved profile. P9 completed627 performance requests and its matched-cache diagnostic;
-P10 has been created, with no P10 performance measurements yet.
+P10 also completed627 performance requests, three reference requests,
+29matched-cache requests and two exact nonce/natural-stop checks. The archive
+and127files are SHA256 verified; all8rank traces and12files are verified separately.
 
 
 ## Paired resident/host-cache diagnostic
@@ -72,4 +75,25 @@ existing evidence.
 These are sampled output comparisons, not full-logit equivalence or model
 quality validation. P9 completed29 requests: resident repeats already differ
 before eviction (shared first-top20 logprob difference up to0.488), and host
-reload differs by0.197. P10 remains unmeasured at this revision.
+reload differs by0.197. P10 resident repeats still differ by up to0.505,
+host reload by0.297. All first output IDs match, full32token sequences do not.
+The seven compared outer batches all have1request/256new/130816cached tokens.
+Remaining full-model variation is not explained by outer batch shape or
+localized to HiCache. No tolerances were relaxed.
+
+## Matched serving result
+
+Against P9 (same runtime/layout/padding, only Stream-K differs), P10 fresh TTFT
+is4.937s vs5.002s (-1.3%); mixed short p95 is3.990s vs4.162s (-4.1%).
+Constant-flow short p95 regresses1.496s to1.619s (+8.2%); burst p95 +2.6%.
+Long-request constant-flow E2E is35.485s vs35.158s (+0.9%). Therefore this flag
+is not selected as a general serving speed optimization despite its component
+repeatability benefit. Compared with P2, the full experimental stack improves
+fresh14.0% and mixed short p9518.8%; those are not the isolated Stream-K effect.
+
+The matched two-step GPU trace compared with P8 shows summed layer-max Humming
+time301.38 to276.07ms, but additionally includes the P9 padding fix. Rank1 has
+372ms without recorded kernels vs114ms in P8 and other ranks wait longer in
+AllGather; this single profiled span cannot replace unprofiled TTFT or identify
+a transport regression. See `p10-streamk-analysis.json` and
+`p10-repeatability-analysis.md` for evidence and limits.

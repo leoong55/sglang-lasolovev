@@ -1,0 +1,53 @@
+{
+  "rows": [
+    {
+      "attempt": "p3-r1",
+      "scenario": "01-fresh-r1",
+      "sample_window_s": 8.89729380607605,
+      "calls": 195.0,
+      "cpu_seconds": 1.1300460970960557,
+      "mean_ms": 5.795108190236183
+    },
+    {
+      "attempt": "p3-r1",
+      "scenario": "05-fresh-r2",
+      "sample_window_s": 8.879511594772339,
+      "calls": 277.0,
+      "cpu_seconds": 1.6052828405518085,
+      "mean_ms": 5.795244911739381
+    },
+    {
+      "attempt": "p3-r1",
+      "scenario": "10-fresh-r3",
+      "sample_window_s": 8.889901399612427,
+      "calls": 271.0,
+      "cpu_seconds": 1.583866220433265,
+      "mean_ms": 5.844524798646734
+    },
+    {
+      "attempt": "p5-r1",
+      "scenario": "01-fresh-r1",
+      "sample_window_s": 8.901870250701904,
+      "calls": 285.0,
+      "cpu_seconds": 0.9609630922786891,
+      "mean_ms": 3.3718003237848744
+    },
+    {
+      "attempt": "p5-r1",
+      "scenario": "05-fresh-r2",
+      "sample_window_s": 8.813266038894653,
+      "calls": 302.0,
+      "cpu_seconds": 1.008071141783148,
+      "mean_ms": 3.337983913189232
+    },
+    {
+      "attempt": "p5-r1",
+      "scenario": "10-fresh-r3",
+      "sample_window_s": 8.844390869140625,
+      "calls": 221.0,
+      "cpu_seconds": 0.6732280503492802,
+      "mean_ms": 3.0462807708112227
+    }
+  ],
+  "limits": "Single exporter counters, no TP sum. First-to-last scrape covers part of scenario; includes decode and idle calls. P3 sync function and P5 pending drain are different scopes, cannot equate with removed critical-path latency."
+}

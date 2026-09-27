@@ -1,0 +1,46 @@
+{
+  "checked_at": "2026-09-27T00:45:25.861514+00:00",
+  "campaign_resources_remaining": 0,
+  "campaign_gpu_pods": 0,
+  "deleted_completed_jobs": 59,
+  "deleted_configmaps": 40,
+  "deleted_services": 1,
+  "p10_server_deleted_after_verified_export": true,
+  "preserved_pvcs": [
+    {
+      "name": "glm53-topology-night-results",
+      "uid": "491fbdcb-a91b-450e-9545-90f4cbe86a45",
+      "phase": "Bound",
+      "volumeName": "pvc-491fbdcb-a91b-450e-9545-90f4cbe86a45"
+    },
+    {
+      "name": "sglang-flash-pvc",
+      "uid": "29072b57-ce1b-4c9f-8a14-d39125591e8d",
+      "phase": "Bound",
+      "volumeName": "pvc-60b7e66c-c0a9-49c4-b822-88e4668ffffd"
+    },
+    {
+      "name": "sglang-fp8-pvc",
+      "uid": "6df200ce-57ca-464d-925d-58e79f30dbd3",
+      "phase": "Bound",
+      "volumeName": "pvc-1cdbbca7-fd0f-46d0-ac6a-8ca6b33166b2"
+    },
+    {
+      "name": "sglang-glm53-dcp4-compile-cache",
+      "uid": "f982b4d6-81b8-4d40-80c8-ed1002a5666e",
+      "phase": "Bound",
+      "volumeName": "pvc-f6b1adca-ecfd-46fb-a911-29931d8b8db0"
+    },
+    {
+      "name": "sglang-w4fp8-pvc",
+      "uid": "718807a5-6ffe-4194-b07b-47f40d3d6b04",
+      "phase": "Bound",
+      "volumeName": "pvc-b6185145-754a-4b0d-97fa-8b7bbc307d61"
+    }
+  ],
+  "all_pvc_uids_and_volume_names_unchanged": true,
+  "archives_verified": 21,
+  "archive_files_verified": 1069,
+  "additional_pod_logs_saved": 59,
+  "scope": "Only exact campaign-labelled Jobs/ConfigMaps/Service; PVCs and other campaign resources not deleted"
+}

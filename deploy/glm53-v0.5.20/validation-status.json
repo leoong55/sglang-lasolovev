@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-26",
+  "date": "2026-09-27",
   "base_commit": "fcd40b5f1ac133afaf4cd1aba8f63d3d4c9af57a",
   "cpu": {
     "passed": 57,
@@ -17,7 +17,12 @@
     "moe_pad_id_regression": {
       "tests_passed": 2,
       "unpatched_source_failures": 2,
-      "scope": "Actual StandardDispatcher.dispatch AST with CPU vector stand-ins; CUDA numerical retest pending"
+      "scope": "Actual StandardDispatcher AST with CPU vector stand-ins; GPU padding cases passed in arithmetic r2/r3"
+    },
+    "streamk_disable_regression": {
+      "tests_passed": 2,
+      "unpatched_failures": 1,
+      "source_commit": "fe1dcba13"
     }
   },
   "cuda": {
@@ -55,16 +60,61 @@
       "identity_layout": true,
       "diagnosis": "-1 padding aliases last expert in standard EP mapping; opt-in preservation patch prepared",
       "full_model_parity": false
+    },
+    "expert_arithmetic_r2": {
+      "status": "failed",
+      "completed_cases_per_rank": 7,
+      "first_failure": {
+        "rank": 0,
+        "layer": 3,
+        "rows": 2048,
+        "seed": 41,
+        "layout": "identity",
+        "check": "graph vs eager",
+        "mismatch_fraction": 0.027,
+        "max_absolute_difference": 0.052734375
+      },
+      "secondary_failure": "Other ranks hit NCCL peer-memory error after rank0 assertion exit; not evidence of original transport fault",
+      "thresholds_relaxed": false,
+      "padding_empty_case_passed": true
+    },
+    "expert_arithmetic_r3": {
+      "status": "component_reference_gates_passed",
+      "source": "fe1dcba13",
+      "unique_cases": 36,
+      "ranks": 8,
+      "layouts_per_case": 2,
+      "all_graph_eager_checks_passed": true,
+      "max_local_reference_l2": 0.048313338309526443,
+      "max_ep8_reference_l2": 0.04598803445696831,
+      "max_cross_layout_fp32_sum_l2": 0.0023677756544202566,
+      "max_cross_layout_bf16_sum_l2": 0.0048753065057098866,
+      "cross_layout_strict_pass": 24,
+      "cross_layout_cases": 288,
+      "full_model_numerical_parity": false,
+      "archive_sha256_verified": true,
+      "files_verified": 14
+    },
+    "humming_drift": {
+      "status": "completed",
+      "cases_per_rank": 32,
+      "ranks": 8,
+      "native_same_graph_eager_pass": 33,
+      "frozen_sort_pass": 57,
+      "streamk_off_pass": 64,
+      "total_cases_per_mode": 64,
+      "conclusion": "Stream-K disables observed numerical variation; sorting is a contributor, not the only cause",
+      "full_model_parity": false
     }
   },
   "image_built": false,
-  "model_requests_sent": 4486,
+  "model_requests_sent": 5809,
   "performance_validated": false,
   "oom_headroom_validated": false,
   "validated_gpu_profile": null,
-  "source_tested": "4f440e4f5",
+  "source_tested": "See measured_runtime_sources",
   "server_startup": {
-    "status": "six_profiles_ready_and_workloads_completed",
+    "status": "nine_profiles_ready_and_performance_workloads_completed",
     "hicache_size_GB_per_rank": 64,
     "P2": 627,
     "P3": 627,
@@ -72,7 +122,9 @@
     "P5_on_P3": 627,
     "P6graph_on_P4": 627,
     "P6buckets_on_P2": 627,
-    "P8": "627performance requests complete;0errors; firstoutputID3/3equal,top20notexact"
+    "P8": 627,
+    "P9": 627,
+    "P10": 627
   },
   "server_startup_previous_hicache96": {
     "status": "blocked_host_ram_before_readiness",
@@ -90,21 +142,23 @@
     "dcp_logical_tokens": 2400000
   },
   "performance_measurements_available": true,
-  "performance_requests": 4389,
+  "performance_requests": 5643,
   "performance_request_errors": 0,
-  "additional_cache_diagnostic_requests": 78,
-  "smoke_requests": 10,
-  "model_request_count_scope": "External campaign clients only; excludes internal startup warmup and health requests",
+  "additional_cache_diagnostic_requests": 136,
+  "smoke_requests": 14,
+  "model_request_count_scope": "Completed tracked external clients; excludes startup, warmup, health and failed early smoke attempts",
   "remaining": [
-    "EP8 real-weight fixed-layout arithmetic gate (prepared)",
-    "Full-model numerical repeatability/cache correctness remains inconclusive",
-    "Final profile/report acceptance and verified GPU cleanup"
+    "Full-model numerical/cache equivalence remains inconclusive; intermediate tensors needed",
+    "Absolute peak memory/headroom not measured;30s samples only",
+    "No production-approved profile"
   ],
   "cleanup_blocker": null,
-  "profiling_requests": 3,
+  "profiling_requests": 4,
   "performance_acceptance": {
     "P6buckets": "Continuous short-only p95 2.441 to1.432s vsP2; three paired seeds. Fresh/mixed nearly unchanged. Full cache tensor parity still inconclusive.",
-    "P8": "FreshTTFT5.049s vsP2 5.741(-12.1%);mixedshortp954.182vs4.916(-14.9%).Constantshort1.526vsP6buckets1.432(+6.6%).Notaccepted; numericalparityunresolved."
+    "P8": "FreshTTFT5.049s vsP2 5.741(-12.1%);mixedshortp954.182vs4.916(-14.9%).Constantshort1.526vsP6buckets1.432(+6.6%).Notaccepted; numericalparityunresolved.",
+    "P9": "Fresh -0.9%, mixedshort -0.5% vsP8; no >=5% gain; full model not accepted",
+    "P10": "Fresh4.937s (-14.0% vsP2);mixedshortp953.990s (-18.8%);constantshort1.619s (+8.2% vsP9,+13.0% vsP6buckets);notaccepted"
   },
   "expert_calibration_requests": 3,
   "cache_matched_diagnostic": {
@@ -114,5 +168,57 @@
     "host_reload_difference": 0.44080352783203125,
     "result": "inconclusive; no tolerances relaxed"
   },
-  "model_reference_requests": 3
+  "model_reference_requests": 9,
+  "measured_runtime_sources": [
+    "4f440e4f5",
+    "1b99488b8",
+    "fe1dcba13"
+  ],
+  "campaign_status": "completed_with_limits",
+  "cleanup": {
+    "checked_at": "2026-09-27T00:45:25.861514+00:00",
+    "campaign_resources_remaining": 0,
+    "campaign_gpu_pods": 0,
+    "deleted_completed_jobs": 59,
+    "deleted_configmaps": 40,
+    "deleted_services": 1,
+    "p10_server_deleted_after_verified_export": true,
+    "preserved_pvcs": [
+      {
+        "name": "glm53-topology-night-results",
+        "uid": "491fbdcb-a91b-450e-9545-90f4cbe86a45",
+        "phase": "Bound",
+        "volumeName": "pvc-491fbdcb-a91b-450e-9545-90f4cbe86a45"
+      },
+      {
+        "name": "sglang-flash-pvc",
+        "uid": "29072b57-ce1b-4c9f-8a14-d39125591e8d",
+        "phase": "Bound",
+        "volumeName": "pvc-60b7e66c-c0a9-49c4-b822-88e4668ffffd"
+      },
+      {
+        "name": "sglang-fp8-pvc",
+        "uid": "6df200ce-57ca-464d-925d-58e79f30dbd3",
+        "phase": "Bound",
+        "volumeName": "pvc-1cdbbca7-fd0f-46d0-ac6a-8ca6b33166b2"
+      },
+      {
+        "name": "sglang-glm53-dcp4-compile-cache",
+        "uid": "f982b4d6-81b8-4d40-80c8-ed1002a5666e",
+        "phase": "Bound",
+        "volumeName": "pvc-f6b1adca-ecfd-46fb-a911-29931d8b8db0"
+      },
+      {
+        "name": "sglang-w4fp8-pvc",
+        "uid": "718807a5-6ffe-4194-b07b-47f40d3d6b04",
+        "phase": "Bound",
+        "volumeName": "pvc-b6185145-754a-4b0d-97fa-8b7bbc307d61"
+      }
+    ],
+    "all_pvc_uids_and_volume_names_unchanged": true,
+    "archives_verified": 21,
+    "archive_files_verified": 1069,
+    "additional_pod_logs_saved": 59,
+    "scope": "Only exact campaign-labelled Jobs/ConfigMaps/Service; PVCs and other campaign resources not deleted"
+  }
 }

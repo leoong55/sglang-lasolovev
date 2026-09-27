@@ -1,0 +1,8 @@
+{
+  "checked_at": "2026-09-27T00:51:40.545266+00:00",
+  "measured_profiles_exact_argv_env_and_dry_run": 9,
+  "analysis_scripts_parse": 5,
+  "served_html_equals_final_artifact": true,
+  "visual_screenshot_check": "unavailable: CUA runtime failed to initialize (sandbox TIOCSTI); no visual-render pass claimed",
+  "campaign_caffeinate_absent": true
+}

@@ -1,0 +1,91 @@
+{
+  "attempt": "p10-streamk-r1",
+  "observed_comparison_batches": [
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-resident-before-0"
+      ],
+      "requests": 1
+    },
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-resident-before-1"
+      ],
+      "requests": 1
+    },
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-resident-before-2"
+      ],
+      "requests": 1
+    },
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-host-reload"
+      ],
+      "requests": 1
+    },
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-resident-after-0"
+      ],
+      "requests": 1
+    },
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-resident-after-1"
+      ],
+      "requests": 1
+    },
+    {
+      "continuation_fraction": 0.0,
+      "continuation_tokens": 0,
+      "kind": "batch",
+      "new_tokens": 256,
+      "prefix_tokens": 130816,
+      "rank": 0,
+      "request_ids": [
+        "cache-matched-resident-after-2"
+      ],
+      "requests": 1
+    }
+  ],
+  "all_single_request_256_new_130816_prefix": true,
+  "scope": "Scheduler outer batch metadata only; does not assert identical internal kernel plans, KV addresses, reduction order or logprob correctness."
+}
